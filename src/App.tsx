@@ -157,6 +157,8 @@ export default function App() {
         setSlots(defaultSlots);
         setLastSynced(new Date());
       }
+    }, (error) => {
+      console.error("Firestore slots listener error:", error);
     });
 
     // Listen to notifications collection
@@ -166,6 +168,8 @@ export default function App() {
       if (notifsList.length > 0) {
         setNotifications(notifsList);
       }
+    }, (error) => {
+      console.error("Firestore notifications listener error:", error);
     });
 
     // Listen to bookings collection
@@ -185,6 +189,8 @@ export default function App() {
           .sort((a, b) => new Date(b.booking_time).getTime() - new Date(a.booking_time).getTime());
         setHistory(userHistory);
       }
+    }, (error) => {
+      console.error("Firestore bookings listener error:", error);
     });
 
     // Listen to config collection/document
@@ -201,6 +207,8 @@ export default function App() {
         setDoc(doc(db, 'config', 'global'), defaultConfig).catch(console.error);
         setConfig(defaultConfig);
       }
+    }, (error) => {
+      console.error("Firestore config listener error:", error);
     });
 
     return () => {
