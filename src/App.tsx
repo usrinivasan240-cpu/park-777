@@ -1,0 +1,2070 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Car, 
+  Clock, 
+  User as UserIcon, 
+  Settings, 
+  LogOut, 
+  LogIn, 
+  Shield, 
+  Bell, 
+  QrCode, 
+  X, 
+  CheckCircle2, 
+  AlertTriangle, 
+  Plus, 
+  Trash2, 
+  Gauge, 
+  TrendingUp, 
+  DollarSign, 
+  Activity, 
+  Database,
+  Cpu,
+  RefreshCw,
+  Search,
+  Sliders,
+  Sparkles,
+  Info,
+  ChevronRight,
+  Sun,
+  Moon
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer, 
+  AreaChart, 
+  Area,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
+import { User, ParkingSlot, Booking, ParkingNotification, AdminStats } from './types';
+
+export default function App() {
+  // --- States ---
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('parking_token'));
+  const [slots, setSlots] = useState<ParkingSlot[]>([]);
+  const [history, setHistory] = useState<Booking[]>([]);
+  const [notifications, setNotifications] = useState<ParkingNotification[]>([]);
+  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
+  const [allBookings, setAllBookings] = useState<any[]>([]);
+  const [config, setConfig] = useState({ gracePeriodMinutes: 2, hourlyRate: 5.0 });
+
+  // UI States
+  const [activeTab, setActiveTab] = useState<'parking' | 'bookings' | 'admin' | 'profile'>('parking');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  
+  // Forms States
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [bookingMinutes, setBookingMinutes] = useState<number>(30);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingInProcess, setBookingInProcess] = useState(false);
+  const [bookingError, setBookingError] = useState('');
+
+  // Admin Forms
+  const [newSlotId, setNewSlotId] = useState('');
+  const [newSlotLoc, setNewSlotLoc] = useState('');
+  const [adminSlotError, setAdminSlotError] = useState('');
+  const [editGrace, setEditGrace] = useState<number>(2);
+  const [editRate, setEditRate] = useState<number>(5.0);
+  
+  // Profile Forms
+  const [profileName, setProfileName] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profilePassword, setProfilePassword] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileError, setProfileError] = useState('');
+
+  // Simulator State
+  const [simSlotId, setSimSlotId] = useState<string>('A1');
+  const [simAction, setSimAction] = useState<'car_arrive' | 'car_leave'>('car_arrive');
+  const [simStatusMsg, setSimStatusMsg] = useState<{ text: string; type: 'success' | 'refused' } | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  // Appearance
+  const [darkMode, setDarkMode] = useState<boolean>(
+    localStorage.getItem('parking_theme') === 'dark' || true
+  );
+
+  // Poll intervals
+  const [lastSynced, setLastSynced] = useState<Date>(new Date());
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // --- Theme effect ---
+  useEffect(() => {
+    localStorage.setItem('parking_theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+
+  // --- Initial Profile Fetch & Auto Fetch Sync ---
+  useEffect(() => {
+    if (token) {
+      fetchUserProfile();
+    } else {
+      setUser(null);
+    }
+  }, [token]);
+
+  // Unified Poller for real-time ESP32/Slots Updates
+  const syncAllData = async () => {
+    setIsSyncing(true);
+    try {
+      // 1. Fetch Slots
+      const slotsRes = await fetch('/api/parking/slots');
+      if (slotsRes.ok) {
+        const slotsData = await slotsRes.json();
+        setSlots(slotsData);
+      }
+
+      // 2. Fetch notifications
+      const notifRes = await fetch('/api/notifications');
+      if (notifRes.ok) {
+        const notifData = await notifRes.json();
+        setNotifications(notifData);
+      }
+
+      // 3. Fetch configs
+      const configRes = await fetch('/api/config');
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        setConfig(configData);
+      }
+
+      // If user is authenticated, fetch history
+      if (token) {
+        const historyRes = await fetch('/api/parking/history', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          setHistory(historyData);
+        }
+
+        // If user is Admin, fetch bookings log + admin stats
+        const decoded = parseJwt(token);
+        if (decoded && decoded.role === 'admin') {
+          const adminBookingsRes = await fetch('/api/admin/bookings', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (adminBookingsRes.ok) {
+            const adminB = await adminBookingsRes.json();
+            setAllBookings(adminB);
+          }
+
+          const statsRes = await fetch('/api/admin/stats', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (statsRes.ok) {
+            const statsData = await statsRes.json();
+            setAdminStats(statsData);
+          }
+        }
+      }
+
+      setLastSynced(new Date());
+    } catch (e) {
+      console.error('Real-time sync failed:', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncAllData();
+    // Real-time API Poller (Every 3 seconds to ensure rapid testing transitions show as live updates)
+    const interval = setInterval(() => {
+      syncAllData();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [token]);
+
+  // Load grace and rate input sliders when config loads
+  useEffect(() => {
+    setEditGrace(config.gracePeriodMinutes);
+    setEditRate(config.hourlyRate);
+  }, [config]);
+
+  // Helper decoded token info without full outer library
+  function parseJwt(t: string): any {
+    try {
+      const base64Url = t.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  const fetchUserProfile = async () => {
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        setProfileName(data.name);
+        setProfileEmail(data.email);
+      } else {
+        // Stale or bad token
+        handleSignOut();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // --- Auth Handlers ---
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const payload = authMode === 'login' 
+      ? { email: authEmail, password: authPassword }
+      : { name: authName, email: authEmail, password: authPassword };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || 'Authentication occurred an error');
+      } else {
+        localStorage.setItem('parking_token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        setShowAuthModal(false);
+        setAuthEmail('');
+        setAuthPassword('');
+        setAuthName('');
+        // Sync straight away
+        setTimeout(() => syncAllData(), 300);
+      }
+    } catch (err) {
+      setAuthError('Connection failed. Please verify status.');
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem('parking_token');
+    setToken(null);
+    setUser(null);
+    setHistory([]);
+    setAllBookings([]);
+    setAdminStats(null);
+    setActiveTab('parking');
+  };
+
+  const handleQuickDemoLogin = async (role: 'user' | 'admin') => {
+    setAuthError('');
+    const email = role === 'admin' ? 'admin@example.com' : 'user@example.com';
+    const password = role === 'admin' ? 'admin123' : 'password123';
+    
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('parking_token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        setShowAuthModal(false);
+        // Switch view context dynamically
+        if (role === 'admin') {
+          setActiveTab('admin');
+        } else {
+          setActiveTab('parking');
+        }
+        setTimeout(() => syncAllData(), 300);
+      } else {
+        setAuthError(data.error);
+      }
+    } catch (e) {
+      setAuthError('Demo gateway offline.');
+    }
+  };
+
+  // --- Profile update ---
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileSuccess('');
+    setProfileError('');
+    try {
+      const res = await fetch('/api/auth/update-profile', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: profileName,
+          email: profileEmail,
+          password: profilePassword || undefined
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUser(data.user);
+        setProfilePassword('');
+        setProfileSuccess('Profile credentials updated successfully!');
+      } else {
+        setProfileError(data.error || 'Failed to update profile.');
+      }
+    } catch (e) {
+      setProfileError('Failed to establish server update route.');
+    }
+  };
+
+  // --- Booking creation/cancellation Handlers ---
+  const handleOpenBooking = (slotId: string) => {
+    if (!token) {
+      setShowAuthModal(true);
+      setAuthMode('login');
+      return;
+    }
+    const targetSlot = slots.find(s => s.slot_id === slotId);
+    if (!targetSlot || targetSlot.status !== 'available') return;
+    
+    // Check double booking rule
+    const activeBooking = history.find(b => b.status === 'active');
+    if (activeBooking) {
+      alert(`Double Booking Blocked: You already hold an active reservation for ${activeBooking.slot_id}. Please resolve or cancel it before reserving another space!`);
+      return;
+    }
+
+    setSelectedSlot(slotId);
+    setShowBookingModal(true);
+    setBookingMinutes(30);
+    setBookingError('');
+  };
+
+  const handleConfirmReservation = async () => {
+    if (!selectedSlot) return;
+    setBookingInProcess(true);
+    setBookingError('');
+
+    try {
+      const res = await fetch('/api/parking/book', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          slot_id: selectedSlot,
+          booking_minutes: bookingMinutes
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShowBookingModal(false);
+        // Refresh values immediately
+        syncAllData();
+      } else {
+        setBookingError(data.error || 'Failed to complete booking reservation.');
+      }
+    } catch (e) {
+      setBookingError('Dynamic backend reservation connection failed.');
+    } finally {
+      setBookingInProcess(false);
+    }
+  };
+
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!confirm('Are you absolutely sure you want to cancel this booking and surrender your parking space?')) return;
+    try {
+      const res = await fetch('/api/parking/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ booking_id: bookingId })
+      });
+      if (res.ok) {
+        syncAllData();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Failed to cancel booking.');
+      }
+    } catch (e) {
+      alert('Network transmission failed.');
+    }
+  };
+
+  // --- ESP32 IR Sensor Real-Time Hardware Simulator Engine ---
+  const handleTransmitSimulate = async () => {
+    setIsSimulating(true);
+    setSimStatusMsg(null);
+    try {
+      const res = await fetch('/api/esp32/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_id: simSlotId,
+          action: simAction
+        })
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        setSimStatusMsg({
+          text: `ESP-NOW Transmit Successful: Slot ${simSlotId} status updated to [${data.new_status.toUpperCase()}].`,
+          type: 'success'
+        });
+        // Pull updates instantly
+        syncAllData();
+      } else {
+        setSimStatusMsg({
+          text: `Hardware Rejected: ${data.error || 'Incorrect state transition map.'}`,
+          type: 'refused'
+        });
+      }
+    } catch (e) {
+      setSimStatusMsg({
+        text: 'ESP32 Device Node offline or out-of-range.',
+        type: 'refused'
+      });
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  // --- Admin Roster & Configurations Handlers ---
+  const handleAddSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminSlotError('');
+    if (!newSlotId || !newSlotLoc) {
+      setAdminSlotError('Fill in clean values.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/slots', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ slot_id: newSlotId, location: newSlotLoc })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNewSlotId('');
+        setNewSlotLoc('');
+        syncAllData();
+      } else {
+        setAdminSlotError(data.error || 'Refused to append slot node.');
+      }
+    } catch (e) {
+      setAdminSlotError('Fail communicating admin portal.');
+    }
+  };
+
+  const handleDeleteSlot = async (slotId: string) => {
+    if (!confirm(`Confirm absolute deletion of slot node ${slotId} from system index?`)) return;
+    try {
+      const res = await fetch(`/api/admin/slots/${slotId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        syncAllData();
+      } else {
+        const d = await res.json();
+        alert(d.error || 'Failed.');
+      }
+    } catch (e) {
+      alert('Fail.');
+    }
+  };
+
+  const handleUpdateConfig = async () => {
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          gracePeriodMinutes: editGrace,
+          hourlyRate: editRate
+        })
+      });
+      if (res.ok) {
+        alert('Global configuration payload compiled successfully!');
+        syncAllData();
+      }
+    } catch (e) {
+      alert('Fail updating server settings config.');
+    }
+  };
+
+  const handleReadAllNotifications = async () => {
+    try {
+      await fetch('/api/notifications/read-all', { method: 'POST' });
+      syncAllData();
+    } catch (e) {}
+  };
+
+  // --- Calculations for user metrics panel ---
+  const activeBooking = history.find(b => b.status === 'active');
+  const availableSlots = slots.filter(s => s.status === 'available');
+  const reservedSlots = slots.filter(s => s.status === 'reserved');
+  const occupiedSlots = slots.filter(s => s.status === 'occupied');
+
+  const filteredSlots = slots.filter(s => {
+    // Floor Filter
+    if (filterFloor !== 'all') {
+      const floorNum = filterFloor === 'floor1' ? 'Floor 1' : 'Floor 2';
+      if (!s.location.toLowerCase().includes(floorNum.toLowerCase())) return false;
+    }
+    // Status Filter
+    if (filterStatus !== 'all') {
+      if (s.status !== filterStatus) return false;
+    }
+    // Search Term
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      return s.slot_id.toLowerCase().includes(search) || s.location.toLowerCase().includes(search);
+    }
+    return true;
+  });
+
+  // Countdown clock component inside App context
+  function CountdownTimer({ targetTime, onExpire }: { targetTime: string; onExpire: () => void }) {
+    const [timeLeft, setTimeLeft] = useState<string>('');
+    const [secondsLeft, setSecondsLeft] = useState<number>(0);
+
+    useEffect(() => {
+      const updateTimer = () => {
+        const now = new Date().getTime();
+        const expiry = new Date(targetTime).getTime();
+        const diff = expiry - now;
+
+        if (diff <= 0) {
+          setTimeLeft('Expired (Grace Timeout)');
+          setSecondsLeft(0);
+          onExpire();
+          return;
+        }
+
+        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const secs = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
+        setSecondsLeft(diff / 1000);
+      };
+
+      updateTimer();
+      const interval = setInterval(updateTimer, 1000);
+      return () => clearInterval(interval);
+    }, [targetTime]);
+
+    return (
+      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 font-mono text-xs">
+        <Clock size={12} className={secondsLeft < 30 ? "animate-pulse" : ""} />
+        <span>Time Remaining:</span>
+        <span className="font-semibold">{timeLeft}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans`}>
+      {/* --- Top Header Nav --- */}
+      <header className={`sticky top-0 z-40 backdrop-blur-md border-b transition-colors ${darkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-white/90 border-slate-200 shadow-xs'}`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex justify-between items-center">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/25">
+              <Car size={22} className="stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold font-display tracking-tight">ParkQuantum</h1>
+                <span className="px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  ESP32 Linked
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">Smart Automated IoT Parking Management</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Dark Mode toggle */}
+            <button 
+              id="theme-toggler"
+              onClick={() => setDarkMode(!darkMode)}
+              className={`p-2 rounded-lg border transition-colors ${darkMode ? 'border-slate-800 hover:bg-slate-800' : 'border-slate-200 hover:bg-slate-100'}`}
+              title="Toggle theme"
+            >
+              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            {/* Sync feedback */}
+            <button 
+              onClick={syncAllData} 
+              className={`p-2 rounded-lg border flex items-center gap-1.5 text-xs font-mono transition-colors ${darkMode ? 'border-slate-800 text-slate-400 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+            >
+              <RefreshCw size={13} className={isSyncing ? "animate-spin text-blue-500" : ""} />
+              <span className="hidden md:inline">Sync {lastSynced.toLocaleTimeString()}</span>
+            </button>
+
+            {/* Authentication Indicator */}
+            {user ? (
+              <div className="flex items-center gap-2.5">
+                <div className="hidden sm:block text-right">
+                  <p className="text-xs font-semibold">{user.name}</p>
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${user.role === 'admin' ? 'text-rose-500' : 'text-blue-500'}`}>
+                    {user.role} Space
+                  </p>
+                </div>
+                <button
+                  id="sign-out-btn"
+                  onClick={handleSignOut}
+                  className={`p-2 sm:px-3 sm:py-1.5 rounded-lg border flex items-center gap-2 text-xs font-medium cursor-pointer transition-colors ${
+                    darkMode ? 'border-red-500/30 text-red-400 bg-red-950/10 hover:bg-red-950/30' : 'border-red-200 text-red-600 bg-red-50 hover:bg-red-100'
+                  }`}
+                >
+                  <LogOut size={13} />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                id="sign-in-prompt-btn"
+                onClick={() => {
+                  setAuthMode('login');
+                  setShowAuthModal(true);
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-shadow shadow-xs hover:shadow-md cursor-pointer"
+              >
+                <LogIn size={13} />
+                Sign In
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* --- Main Contents Container --- */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        
+        {/* --- Unified Header Notice & Booking Countdown Widget --- */}
+        {activeBooking && (
+          <div className="mb-6 p-4 rounded-xl border border-blue-500/20 bg-blue-600/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                <QrCode size={20} />
+              </div>
+              <div>
+                <p className="text-xs text-blue-500 uppercase tracking-widest font-bold">Your Live Parking Reservation</p>
+                <h4 className="text-sm font-semibold mt-0.5">
+                  Slot <span className="text-blue-500 font-mono font-bold text-lg">{activeBooking.slot_id}</span> is fully locked for your vehicle
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Arrive at the slot before countdown expires. Your ESP32 sensor logs checking-in automatically upon bumper arrival.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-3">
+              <CountdownTimer 
+                targetTime={activeBooking.expiry_time} 
+                onExpire={() => {
+                  syncAllData();
+                }} 
+              />
+              <button
+                onClick={() => handleCancelBooking(activeBooking.booking_id)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 cursor-pointer"
+              >
+                Cancel Space Node
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* --- Quick Demo Portal Notice for Reviewers --- */}
+        {!user && (
+          <div className={`mb-6 p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-sky-50/70 border-sky-200'}`}>
+            <div className="flex items-start gap-2.5">
+              <Sparkles size={18} className="text-yellow-400 mt-0.5 animate-pulse" />
+              <div>
+                <h4 className="text-sm font-semibold">Demo Evaluation Accounts Available</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Instant login to standard User settings or full Admin configurations using the fast credentials shortcuts. No signups required.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                id="demo-user-button"
+                onClick={() => handleQuickDemoLogin('user')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border cursor-pointer ${darkMode ? 'border-slate-700 hover:bg-slate-850' : 'border-slate-200 hover:bg-white bg-slate-100'}`}
+              >
+                Demo User Shortcut
+              </button>
+              <button
+                id="demo-admin-button"
+                onClick={() => handleQuickDemoLogin('admin')}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600/10 border border-rose-500/20 text-rose-500 hover:bg-rose-600/20 cursor-pointer"
+              >
+                Demo Admin Portal
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* --- Real-Time Analytics Dashboard Indicators (Top Widgets) --- */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+            <div className="flex justify-between items-start">
+              <span className="text-xs text-slate-500 font-semibold font-display uppercase tracking-wider">Total Slots</span>
+              <span className="p-1 px-1.5 text-[10px] rounded bg-slate-500/10 text-slate-400 font-mono font-semibold">Nodes</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl sm:text-3xl font-extrabold font-display">{slots.length}</span>
+              <span className="text-[10px] text-slate-400 font-medium">registered</span>
+            </div>
+            <div className="mt-2.5 w-full bg-slate-800 rounded-full h-1">
+              <div className="bg-slate-300 h-1 rounded-full w-full" />
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+            <div className="flex justify-between items-start">
+              <span className="text-xs text-emerald-500 font-semibold font-display uppercase tracking-wider">Available</span>
+              <span className="p-1 px-1.5 text-[10px] rounded bg-emerald-500/10 text-emerald-500 font-mono font-semibold">READY</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl sm:text-3xl font-extrabold font-display text-emerald-500">{availableSlots.length}</span>
+              <span className="text-[10px] text-slate-400 font-medium font-mono">{Math.round((availableSlots.length/slots.length)*100 || 0)}% free</span>
+            </div>
+            <div className="mt-2.5 w-full bg-slate-800 rounded-full h-1">
+              <div 
+                className="bg-emerald-500 h-1 rounded-full transition-all duration-500" 
+                style={{ width: `${(availableSlots.length/slots.length)*100 || 0}%` }} 
+              />
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+            <div className="flex justify-between items-start">
+              <span className="text-xs text-amber-500 font-semibold font-display uppercase tracking-wider">Reserved</span>
+              <span className="p-1 px-1.5 text-[10px] rounded bg-amber-500/10 text-amber-500 font-mono font-semibold">GRACE</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl sm:text-3xl font-extrabold font-display text-amber-500">{reservedSlots.length}</span>
+              <span className="text-[10px] text-slate-400 font-medium">authorized</span>
+            </div>
+            <div className="mt-2.5 w-full bg-slate-800 rounded-full h-1">
+              <div 
+                className="bg-amber-500 h-1 rounded-full transition-all duration-500" 
+                style={{ width: `${(reservedSlots.length/slots.length)*100 || 0}%` }} 
+              />
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+            <div className="flex justify-between items-start">
+              <span className="text-xs text-red-500 font-semibold font-display uppercase tracking-wider">Occupied</span>
+              <span className="p-1 px-1.5 text-[10px] rounded bg-red-500/10 text-red-500 font-mono font-semibold">SENSORS</span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl sm:text-3xl font-extrabold font-display text-red-500">{occupiedSlots.length}</span>
+              <span className="text-[10px] text-slate-400 font-medium">vehicles live</span>
+            </div>
+            <div className="mt-2.5 w-full bg-slate-800 rounded-full h-1">
+              <div 
+                className="bg-red-500 h-1 rounded-full transition-all duration-500" 
+                style={{ width: `${(occupiedSlots.length/slots.length)*100 || 0}%` }} 
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* --- Tab Navigation Rail --- */}
+        <div className="flex items-center justify-between border-b border-slate-800/20 mb-6 pb-px flex-wrap gap-2">
+          <nav className="flex space-x-2">
+            <button
+              onClick={() => setActiveTab('parking')}
+              className={`pb-3 px-4 text-xs font-semibold transition-all relative border-b-2 hover:text-blue-500 cursor-pointer ${
+                activeTab === 'parking' 
+                  ? 'border-blue-500 text-blue-500 font-bold' 
+                  : 'border-transparent text-slate-400'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Car size={13} />
+                Real-Time Decks
+              </div>
+            </button>
+
+            {user && (
+              <button
+                onClick={() => setActiveTab('bookings')}
+                className={`pb-3 px-4 text-xs font-semibold transition-all relative border-b-2 hover:text-blue-500 cursor-pointer ${
+                  activeTab === 'bookings' 
+                    ? 'border-blue-500 text-blue-500 font-bold' 
+                    : 'border-transparent text-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Activity size={13} />
+                  My Booking Logs
+                </div>
+              </button>
+            )}
+
+            {user && user.role === 'admin' && (
+              <button
+                id="admin-dashboard-tab"
+                onClick={() => setActiveTab('admin')}
+                className={`pb-3 px-4 text-xs font-semibold transition-all relative border-b-2 hover:text-blue-500 cursor-pointer ${
+                  activeTab === 'admin' 
+                    ? 'border-blue-500 text-blue-500 font-bold' 
+                    : 'border-transparent text-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-rose-500 font-semibold">
+                  <Shield size={13} />
+                  Admin Analytics Workspace
+                </div>
+              </button>
+            )}
+
+            {user && (
+              <button
+                onClick={() => setActiveTab('profile')}
+                className={`pb-3 px-4 text-xs font-semibold transition-all relative border-b-2 hover:text-blue-500 cursor-pointer ${
+                  activeTab === 'profile' 
+                    ? 'border-blue-500 text-blue-500 font-bold' 
+                    : 'border-transparent text-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <UserIcon size={13} />
+                  Profile Configuration
+                </div>
+              </button>
+            )}
+          </nav>
+          
+          <div className="pb-3 text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            Rate: <span className="font-semibold text-blue-500">${config.hourlyRate?.toFixed(2)}/hr</span>
+            <span className="text-slate-600">|</span>
+            Grace Period: <span className="font-semibold text-amber-500">{config.gracePeriodMinutes} mins</span>
+          </div>
+        </div>
+
+        {/* ========================================================
+            TAB: REAL-TIME DECK MAP & HARDWARE EMULATION
+           ======================================================== */}
+        {activeTab === 'parking' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* Left Block: Search and Floor Plan Layout Schematic */}
+            <div className="lg:col-span-8 space-y-6">
+              
+              {/* Filter controls panel */}
+              <div className={`p-4 rounded-xl border flex flex-wrap gap-4 items-center justify-between transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex items-center gap-2 max-w-xs w-full">
+                  <Search size={14} className="text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search node or location..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className={`w-full bg-transparent border-none text-xs focus:ring-0 focus:outline-hidden ${darkMode ? 'text-slate-100 placeholder-slate-500' : 'text-slate-950 placeholder-slate-450'}`}
+                  />
+                  {searchTerm && (
+                    <button onClick={() => setSearchTerm('')} className="p-0.5 hover:text-red-500">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-slate-500 font-medium">Decks:</span>
+                    <select
+                      value={filterFloor}
+                      onChange={(e) => setFilterFloor(e.target.value)}
+                      className={`px-2 py-1 rounded text-xs focus:outline-hidden ${darkMode ? 'bg-slate-850 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-350'}`}
+                    >
+                      <option value="all">All Levels</option>
+                      <option value="floor1">Deck Level 1</option>
+                      <option value="floor2">Deck Level 2</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-slate-500 font-medium">Status:</span>
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className={`px-2 py-1 rounded text-xs focus:outline-hidden ${darkMode ? 'bg-slate-850 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-350'}`}
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="available">Available</option>
+                      <option value="reserved">Reserved</option>
+                      <option value="occupied">Occupied</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dynamic Schematic Visual Map Grid */}
+              <div className={`p-6 rounded-2xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex items-center justify-between mb-4 border-b border-slate-800/10 pb-3 flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-display font-semibold text-sm">Interactive Deck Floor Layout</h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Click any pulsating Available green node to reserve a space instantly.</p>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] font-mono">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Available</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Reserved</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> Occupied</span>
+                  </div>
+                </div>
+
+                {/* Simulated Road schematic map design */}
+                <div className={`border p-4 rounded-xl border-dashed relative overflow-x-auto ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/50 border-slate-350'}`}>
+                  
+                  {/* Outer Frame Floor Map */}
+                  <div className="min-w-[600px] space-y-8">
+                    
+                    {/* Floor 1 Section */}
+                    { (filterFloor === 'all' || filterFloor === 'floor1') && (
+                      <div>
+                        {/* Floor Label */}
+                        <div className="flex justify-between items-center px-2 mb-2">
+                          <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500">DECK LEVEL 1 — FRONT & EAST GATEWAY</span>
+                          <span className="text-[10px] text-slate-500 font-mono">Sensors active: {slots.filter(s => s.location.includes('Floor 1')).length} nodes</span>
+                        </div>
+
+                        {/* Layout grid containing slots & road lanes */}
+                        <div className="grid grid-cols-12 items-center gap-2">
+                          
+                          {/* Left Slots lane A */}
+                          <div className="col-span-5 grid grid-cols-3 gap-2.5">
+                            {filteredSlots
+                              .filter(s => s.location.includes('Floor 1') && s.slot_id.startsWith('A'))
+                              .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
+                            }
+                            {filteredSlots.filter(s => s.location.includes('Floor 1') && s.slot_id.startsWith('A')).length === 0 && (
+                              <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
+                            )}
+                          </div>
+
+                          {/* Central Roadway lane */}
+                          <div className={`col-span-2 py-8 rounded-lg flex flex-col justify-between items-center font-mono text-[9px] font-bold tracking-wider ${darkMode ? 'bg-slate-900 border-slate-800 text-slate-600' : 'bg-slate-200 text-slate-400'}`}>
+                            <span>↑ ENTRY</span>
+                            <div className="h-6 border-l-2 border-dashed border-amber-500/40"></div>
+                            <span>SLOW</span>
+                            <div className="h-6 border-l-2 border-dashed border-amber-500/40"></div>
+                            <span>↓ EXIT</span>
+                          </div>
+
+                          {/* Right Slots lane B */}
+                          <div className="col-span-5 grid grid-cols-3 gap-2.5">
+                            {filteredSlots
+                              .filter(s => s.location.includes('Floor 1') && s.slot_id.startsWith('B'))
+                              .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
+                            }
+                            {filteredSlots.filter(s => s.location.includes('Floor 1') && s.slot_id.startsWith('B')).length === 0 && (
+                              <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
+                            )}
+                          </div>
+
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Floor separation marker */}
+                    { filterFloor === 'all' && (
+                      <div className="border-t border-slate-800/20 border-dashed relative py-1 flex justify-center">
+                        <span className={`px-3 py-0.5 rounded text-[9px] font-mono tracking-widest ${darkMode ? 'bg-slate-900 text-slate-500' : 'bg-white border text-slate-400'}`}>RAMP ELEVATION TO UPPER DECK</span>
+                      </div>
+                    )}
+
+                    {/* Floor 2 Section */}
+                    { (filterFloor === 'all' || filterFloor === 'floor2') && (
+                      <div>
+                        {/* Floor Label */}
+                        <div className="flex justify-between items-center px-2 mb-2">
+                          <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500">DECK LEVEL 2 — TERRACE LANES</span>
+                          <span className="text-[10px] text-slate-500 font-mono font-medium">Sensors active: {slots.filter(s => s.location.includes('Floor 2')).length} nodes</span>
+                        </div>
+
+                        {/* Layout grid containing slots & road lanes */}
+                        <div className="grid grid-cols-12 items-center gap-2">
+                          
+                          {/* West Slots Lane */}
+                          <div className="col-span-5 grid grid-cols-3 gap-2.5">
+                            {filteredSlots
+                              .filter(s => s.location.includes('Floor 2'))
+                              .slice(0, 3)
+                              .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
+                            }
+                            {filteredSlots.filter(s => s.location.includes('Floor 2')).length === 0 && (
+                              <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
+                            )}
+                          </div>
+
+                          {/* Central Roadway lane */}
+                          <div className={`col-span-2 py-8 rounded-lg flex flex-col justify-between items-center font-mono text-[9px] font-bold tracking-wider ${darkMode ? 'bg-slate-900 border-slate-800 text-slate-600' : 'bg-slate-200 text-slate-400'}`}>
+                            <span>↑ IN</span>
+                            <div className="h-4 border-l-2 border-dashed border-amber-500/40"></div>
+                            <span>TURN</span>
+                            <div className="h-4 border-l-2 border-dashed border-amber-500/40"></div>
+                            <span>↓ OUT</span>
+                          </div>
+
+                          {/* East Slots Lane */}
+                          <div className="col-span-5 grid grid-cols-3 gap-2.5">
+                            {filteredSlots
+                              .filter(s => s.location.includes('Floor 2'))
+                              .slice(3)
+                              .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
+                            }
+                            {filteredSlots.filter(s => s.location.includes('Floor 2')).slice(3).length === 0 && (
+                              <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
+                            )}
+                          </div>
+
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Block: ESP32 Hardware Emulator Control Panel & System Notifications */}
+            <div className="lg:col-span-4 space-y-6">
+              
+              {/* ESP32 Hardware Device Emulator Engine */}
+              <div className={`p-5 rounded-2xl border relative overflow-hidden transition-colors ${darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-200/40 border-slate-350 shadow-inner'}`}>
+                {/* Circuit Grid Decoration */}
+                <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full blur-xl pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-md pointer-events-none" />
+
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="p-1 px-1.5 rounded-md bg-blue-500/10 text-blue-500 text-[10px] font-bold font-mono uppercase tracking-widest flex items-center gap-1 border border-blue-500/20">
+                    <Cpu size={12} />
+                    IoT EMULATOR
+                  </div>
+                  <h4 className="text-xs font-mono font-bold text-slate-400">ESP32-WROOM-32</h4>
+                </div>
+
+                <h3 className="font-display font-semibold text-sm">ESP32 IR Sensor Array Emulator</h3>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Avoid setup barriers. Directly simulate physical infrared barrier gates & bumper distance-sensor triggers updating the system DB in real-time.
+                </p>
+
+                <div className="space-y-3.5 mt-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1">Target IoT Slot Node</label>
+                    <select
+                      value={simSlotId}
+                      onChange={(e) => setSimSlotId(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
+                    >
+                      {slots.map(s => (
+                        <option key={s.slot_id} value={s.slot_id}>
+                          {s.slot_id} — Current: [{s.status.toUpperCase()}]
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1.5">Action Trigger Type (Hardware signal)</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSimAction('car_arrive')}
+                        className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          simAction === 'car_arrive'
+                            ? 'bg-red-500/10 border-red-500/50 text-red-500 shadow-sm'
+                            : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
+                        }`}
+                      >
+                        <Car size={13} className="shrink-0" />
+                        Car Arrives
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSimAction('car_leave')}
+                        className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          simAction === 'car_leave'
+                            ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500 shadow-sm'
+                            : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
+                        }`}
+                      >
+                        <CheckCircle2 size={13} className="shrink-0" />
+                        Car Vaults (Leaves)
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleTransmitSimulate}
+                    disabled={isSimulating}
+                    className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:shadow-blue-500/10 disabled:opacity-50 transition-all cursor-pointer"
+                  >
+                    <Cpu size={14} className={isSimulating ? "animate-spin" : ""} />
+                    Transmit Sensors payload
+                  </button>
+
+                  <AnimatePresence mode="wait">
+                    {simStatusMsg && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className={`p-3 rounded-lg border text-xs leading-relaxed flex items-start gap-2 ${
+                          simStatusMsg.type === 'success'
+                            ? `${darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50/75 border-emerald-200 text-emerald-700'}`
+                            : `${darkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-450' : 'bg-rose-50 border-rose-200 text-rose-700'}`
+                        }`}
+                      >
+                        {simStatusMsg.type === 'success' ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
+                        <span>{simStatusMsg.text}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Business rules reference box */}
+                  <div className={`p-2.5 rounded-lg border text-[10px] text-slate-500 space-y-1 ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <p className="font-semibold text-slate-400 flex items-center gap-1">
+                      <Sliders size={10} /> IoT Firmware Handcoded Gates:
+                    </p>
+                    <p>• Car Detection inside <b className="text-amber-500 font-medium">RESERVED</b> space updates status straight to <b className="text-red-500 font-medium">OCCUPIED</b>.</p>
+                    <p>• Vehicle vacating <b className="text-red-500 font-medium">OCCUPIED</b> space updates it clean back to <b className="text-emerald-500 font-medium font-bold">AVAILABLE</b>, setting active reservation booking complete.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* System Live Notification Center */}
+              <div className={`p-5 rounded-2xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bell size={15} className="text-blue-500" />
+                    <h3 className="font-display font-semibold text-sm">IoT Broadcast Feed</h3>
+                  </div>
+                  {notifications.some(n => !n.read) && (
+                    <button 
+                      onClick={handleReadAllNotifications} 
+                      className="text-[10px] text-blue-500 hover:underline cursor-pointer"
+                    >
+                      Clear Badge
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                  {notifications.map(notif => (
+                    <div 
+                      key={notif.id} 
+                      className={`p-3 rounded-xl border text-xs transition-all relative ${
+                        !notif.read ? 'border-blue-500/10 bg-blue-500/5' : `${darkMode ? 'border-slate-850 bg-slate-950/30' : 'border-slate-100 bg-slate-50'}`
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 justify-between">
+                        <span className={`font-semibold ${
+                          notif.type === 'success' ? 'text-emerald-500' : notif.type === 'warning' ? 'text-amber-500' : 'text-blue-500'
+                        }`}>
+                          {notif.title}
+                        </span>
+                        <span className="text-[9px] text-slate-500 font-mono font-medium">
+                          {new Date(notif.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-slate-400 mt-1 leading-normal text-[11px]">{notif.message}</p>
+                    </div>
+                  ))}
+
+                  {notifications.length === 0 && (
+                    <div className="py-6 text-center text-xs text-slate-500">
+                      No broadcast notifications yet
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* ========================================================
+            TAB: USER BOOKINGS LOGS HISTORY
+           ======================================================== */}
+        {activeTab === 'bookings' && (
+          <div className={`p-6 rounded-2xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+            <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+              <div>
+                <h2 className="font-display font-bold text-base">My Booking History Workspace</h2>
+                <p className="text-xs text-slate-500">Track and view credentials, check-in statuses, and system receipt tallies.</p>
+              </div>
+              <button 
+                onClick={syncAllData} 
+                className="p-1 px-2.5 rounded border border-slate-800 hover:bg-slate-850 text-xs text-slate-400 flex items-center gap-1 transition-colors"
+              >
+                <RefreshCw size={12} /> Sync Logs
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className={`border-b capitalize font-medium ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                    <th className="py-3 px-4">Booking Token</th>
+                    <th className="py-3 px-4">Reserved Spot</th>
+                    <th className="py-3 px-4">Checked-In At</th>
+                    <th className="py-3 px-4">Duration/Grace Period Limit</th>
+                    <th className="py-3 px-4">Gate Ticket Badge</th>
+                    <th className="py-3 px-4">Operational Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/10">
+                  {history.map((log) => (
+                    <tr key={log.booking_id} className={`hover:bg-slate-850/20 transition-all ${!darkMode && 'hover:bg-slate-50'}`}>
+                      <td className="py-4 px-4 font-mono font-semibold text-blue-500">{log.booking_id}</td>
+                      <td className="py-4 px-4">
+                        <span className="font-bold text-slate-300 font-mono text-sm bg-slate-800/50 p-1 px-2 rounded">{log.slot_id}</span>
+                      </td>
+                      <td className="py-4 px-4 font-mono text-slate-400">
+                        {new Date(log.booking_time).toLocaleString()}
+                      </td>
+                      <td className="py-4 px-4 font-mono text-slate-400">
+                        {new Date(log.expiry_time).toLocaleTimeString()}
+                      </td>
+                      <td className="py-4 px-4">
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+                          <QrCode size={13} className="text-slate-400" />
+                          <span>{log.booking_id}-KEY</span>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                          log.status === 'active' 
+                            ? 'bg-amber-500/15 text-amber-500 border border-amber-500/20 animate-pulse' 
+                            : log.status === 'completed' 
+                            ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/20' 
+                            : 'bg-slate-800/15 text-slate-500 border border-slate-800/30'
+                        }`}>
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-right">
+                        {log.status === 'active' && (
+                          <button
+                            onClick={() => handleCancelBooking(log.booking_id)}
+                            className="text-red-500 hover:underline font-semibold text-xs cursor-pointer"
+                          >
+                            Surrender / Cancel
+                          </button>
+                        )}
+                        {log.status !== 'active' && (
+                          <span className="text-slate-500 text-[11px] font-medium">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {history.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-500 font-medium">
+                        You have not reserved any smart parking spaces yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Visual ticket print card mock */}
+            {activeBooking && (
+              <div className="mt-8 border-t border-slate-800/30 pt-6 flex justify-center">
+                <div className={`p-6 rounded-2xl max-w-sm w-full border relative overflow-hidden ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-350'}`}>
+                  {/* Circle cutouts for ticket look */}
+                  <div className={`absolute -left-3 top-1/2 -mt-3 w-6 h-6 rounded-full border-r ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`} />
+                  <div className={`absolute -right-3 top-1/2 -mt-3 w-6 h-6 rounded-full border-l ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`} />
+
+                  <div className="text-center pb-4 border-b border-dashed border-slate-800/40">
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-blue-500">GATE TICKET PASS</p>
+                    <h3 className="font-display font-bold text-lg mt-0.5">ParkQuantum IoT Node</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Scan upon arrival if requested</p>
+                  </div>
+
+                  <div className="py-6 flex flex-col items-center justify-center">
+                    {/* Simulated vector clean QR Code */}
+                    <div className="p-3 bg-white rounded-xl border-4 border-slate-250 shadow-sm relative">
+                      <div className="grid grid-cols-5 gap-1.5 w-28 h-28">
+                        {/* QR Corners */}
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-300 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-white rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-white rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+
+                        <div className="bg-slate-300 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-300 rounded-xs"></div>
+
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-white rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-white rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-300 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                        <div className="bg-slate-950 rounded-xs"></div>
+                      </div>
+                      <div className="absolute inset-0 m-auto w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg">
+                        <Car size={13} />
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 mt-2 font-semibold">TOKEN ID: {activeBooking.booking_id}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 text-xs font-mono border-t border-dashed border-slate-800/40 pt-4">
+                    <div>
+                      <p className="text-slate-500">ASSIGNED SLOT</p>
+                      <p className="font-bold text-sm text-slate-300 mt-0.5">{activeBooking.slot_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">BOOKED AT</p>
+                      <p className="font-medium mt-0.5">{new Date(activeBooking.booking_time).toLocaleTimeString()}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {/* ========================================================
+            TAB: ADMIN CONTROL WORKSPACE (RECHARTS ANALYTICS)
+           ======================================================== */}
+        {activeTab === 'admin' && user?.role === 'admin' && (
+          <div className="space-y-6">
+            
+            {/* Top Admin Analytics Summary metrics row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex gap-2 items-center text-slate-500 text-xs uppercase tracking-wider font-semibold font-display">
+                  <UserIcon size={14} className="text-rose-500" />
+                  <span>Total Users</span>
+                </div>
+                <div className="text-2xl font-black mt-2 font-display">{adminStats?.totalUsers || 0}</div>
+                <p className="text-[10px] text-slate-500 mt-1">Excludes Operator Admin accounts</p>
+              </div>
+
+              <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex gap-2 items-center text-slate-500 text-xs uppercase tracking-wider font-semibold font-display">
+                  <Activity size={14} className="text-rose-500" />
+                  <span>Total Bookings</span>
+                </div>
+                <div className="text-2xl font-black mt-2 font-display">{adminStats?.totalBookings || 0}</div>
+                <p className="text-[10px] text-slate-500 mt-1">Cumulative bookings logged</p>
+              </div>
+
+              <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex gap-2 items-center text-slate-500 text-xs uppercase tracking-wider font-semibold font-display">
+                  <DollarSign size={14} className="text-emerald-500" />
+                  <span>Total Revenue</span>
+                </div>
+                <div className="text-2xl font-black mt-2 font-display text-emerald-500">${adminStats?.totalRevenue?.toFixed(2) || '0.00'}</div>
+                <p className="text-[10px] text-slate-500 mt-1">Calculated from hours consumed</p>
+              </div>
+
+              <div className={`p-4 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex gap-2 items-center text-slate-500 text-xs uppercase tracking-wider font-semibold font-display">
+                  <Gauge size={14} className="text-blue-500" />
+                  <span>Active Occupancy</span>
+                </div>
+                <div className="text-2xl font-black mt-2 font-display text-blue-500">{adminStats?.occupancyRate || 0}%</div>
+                <p className="text-[10px] text-slate-500 mt-1">Portion of unavailable slot nodes</p>
+              </div>
+            </div>
+
+            {/* Recharts Graphical Dashboards Block */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Peak Hours load graph */}
+              <div className={`p-5 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-display font-semibold text-sm">Peak Demand Hours (Schedules)</h3>
+                  <span className="p-1 px-1.5 text-[9px] font-mono rounded bg-rose-500/10 text-rose-500">24-HR CLOCK MONITOR</span>
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={adminStats?.peakHours || []} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#1e293b" : "#edf2f7"} />
+                      <XAxis dataKey="hour" stroke="#64748b" style={{ fontSize: 10, fontFamily: 'monospace' }} />
+                      <YAxis stroke="#64748b" style={{ fontSize: 10 }} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? '#0f172a' : '#ffffff', 
+                          borderColor: darkMode ? '#334155' : '#cbd5e1',
+                          color: darkMode ? '#f8fafc' : '#0f172a',
+                          fontSize: 11
+                        }} 
+                      />
+                      <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Reservations Count" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Weekly logs timeline graphs */}
+              <div className={`p-5 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-display font-semibold text-sm">Weekly Bookings Timeline</h3>
+                  <span className="p-1 px-1.5 text-[9px] font-mono rounded bg-emerald-500/10 text-emerald-500">LIVE CHRONOLOGY</span>
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={adminStats?.weeklyBookings || []} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="colorBookings" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#1e293b" : "#edf2f7"} />
+                      <XAxis dataKey="day" stroke="#64748b" style={{ fontSize: 10 }} />
+                      <YAxis stroke="#64748b" style={{ fontSize: 10 }} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? '#0f172a' : '#ffffff', 
+                          borderColor: darkMode ? '#334155' : '#cbd5e1',
+                          color: darkMode ? '#f8fafc' : '#0f172a',
+                          fontSize: 11
+                        }} 
+                      />
+                      <Area type="monotone" dataKey="bookings" stroke="#10b981" fillOpacity={1} fill="url(#colorBookings)" name="Slots Booked" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Inventory Management & System Setup Configurations Router */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Global Config setup sliders (Col span 4) */}
+              <div className={`lg:col-span-4 p-5 rounded-xl border space-y-4 h-fit transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className="flex items-center gap-1.5 border-b border-slate-800/10 pb-2.5">
+                  <Settings size={14} className="text-blue-500" />
+                  <h3 className="font-display font-semibold text-sm">Operator Global Parameters</h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between items-center text-xs mb-1">
+                      <span className="text-slate-500">Hourly Multiplier (Price calculated)</span>
+                      <span className="font-bold text-blue-500">${editRate}/hr</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={20}
+                      step={0.5}
+                      value={editRate}
+                      onChange={(e) => setEditRate(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center text-xs mb-1">
+                      <span className="text-slate-500">IoT Auto Grace Expiry Period</span>
+                      <span className="font-bold text-amber-500">{editGrace} minutes</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={15}
+                      step={1}
+                      value={editGrace}
+                      onChange={(e) => setEditGrace(Number(e.target.value))}
+                      className="w-full"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Time allotted for ESP32 sensors to record check-in arrival before auto-vandalizing bookings.</p>
+                  </div>
+
+                  <button
+                    onClick={handleUpdateConfig}
+                    className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
+                  >
+                    Commit Parameters to System
+                  </button>
+                </div>
+              </div>
+
+              {/* Roster Slots Addition Inventory (Col span 8) */}
+              <div className={`lg:col-span-8 p-5 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <h3 className="font-display font-semibold text-sm mb-3">Parking Node Slots Register Inventory</h3>
+                
+                {/* Inline Addition form */}
+                <form onSubmit={handleAddSlot} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4 p-3.5 rounded-lg bg-slate-950/40 border border-slate-800/20">
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Slot ID (e.g. D1)"
+                      value={newSlotId}
+                      onChange={(e) => setNewSlotId(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-950'}`}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Floor Location Details"
+                      value={newSlotLoc}
+                      onChange={(e) => setNewSlotLoc(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-950'}`}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="py-1.5 px-3 rounded-lg bg-rose-600/10 border border-rose-500/20 text-rose-500 font-semibold text-xs flex items-center justify-center gap-1 hover:bg-rose-600/20 cursor-pointer"
+                  >
+                    <Plus size={13} />
+                    Add Node
+                  </button>
+                  {adminSlotError && <p className="col-span-1 sm:col-span-3 text-[10px] text-red-500 font-semibold">{adminSlotError}</p>}
+                </form>
+
+                {/* Slots inventory mini tables */}
+                <div className="overflow-y-auto max-h-[250px] pr-1">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800/30 text-slate-500 font-medium">
+                        <th className="py-2 px-3">Slot Code</th>
+                        <th className="py-2 px-3">Deck Section</th>
+                        <th className="py-2 px-3">Active State</th>
+                        <th className="py-2 px-3 text-right">Gate Operations</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/10">
+                      {slots.map(s => (
+                        <tr key={s.slot_id} className="hover:bg-slate-850/10 transition-colors">
+                          <td className="py-2 px-3 font-mono font-bold text-slate-300 text-sm">{s.slot_id}</td>
+                          <td className="py-2 px-3 text-slate-400">{s.location}</td>
+                          <td className="py-2 px-3">
+                            <span className={`px-1.5 py-px rounded text-[9px] uppercase font-bold ${
+                              s.status === 'available' ? 'bg-emerald-500/10 text-emerald-500' : s.status === 'reserved' ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500'
+                            }`}>
+                              {s.status}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <button
+                              onClick={() => handleDeleteSlot(s.slot_id)}
+                              className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer inline"
+                              title="Delete Slot"
+                            >
+                              <Trash2 size={12} className="inline mr-1" /> Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Global Master Bookings Record Tally */}
+            <div className={`p-5 rounded-xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+              <h3 className="font-display font-semibold text-sm mb-3">Live System-Wide Bookings Record Logs</h3>
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800/30 text-slate-500 font-medium">
+                      <th className="py-2.5 px-3">Booking ID</th>
+                      <th className="py-2.5 px-3">Operator User Name</th>
+                      <th className="py-2.5 px-3">Slot No</th>
+                      <th className="py-2.5 px-3">Locked At</th>
+                      <th className="py-2.5 px-3">Expires At</th>
+                      <th className="py-2.5 px-3">System status</th>
+                      <th className="py-2.5 px-3 text-right">Trigger Authority</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/10">
+                    {allBookings.map((b) => (
+                      <tr key={b.booking_id} className="hover:bg-slate-850/10 transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-blue-500">{b.booking_id}</td>
+                        <td className="py-3 px-3">
+                          <p className="font-semibold text-slate-300">{b.user_name}</p>
+                          <p className="text-[10px] text-slate-500">{b.user_email}</p>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="font-bold text-slate-300 font-mono text-sm bg-slate-800/50 p-1 px-1.5 rounded">{b.slot_id}</span>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-slate-400">{new Date(b.booking_time).toLocaleString()}</td>
+                        <td className="py-3 px-3 font-mono text-slate-400">{new Date(b.expiry_time).toLocaleTimeString()}</td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                            b.status === 'active' 
+                              ? 'bg-amber-500/15 text-amber-500 border border-amber-500/20' 
+                              : b.status === 'completed' 
+                              ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/20' 
+                              : 'bg-slate-800/15 text-slate-500 border border-slate-800/30'
+                          }`}>
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          {b.status === 'active' && (
+                            <button
+                              onClick={() => handleCancelBooking(b.booking_id)}
+                              className="text-red-500 hover:underline font-semibold font-mono text-[10px] uppercase"
+                            >
+                              FORCED CANCEL
+                            </button>
+                          )}
+                          {b.status !== 'active' && <span className="text-slate-600">-</span>}
+                        </td>
+                      </tr>
+                    ))}
+                    {allBookings.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-slate-500">
+                          No active, completed, or cancelled booking logs registered.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ========================================================
+            TAB: USER PROFILE SETTINGS
+           ======================================================== */}
+        {activeTab === 'profile' && user && (
+          <div className="max-w-xl mx-auto">
+            <div className={`p-6 rounded-2xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center gap-3 border-b border-slate-800/10 pb-3 mb-5">
+                <div className="p-2.5 rounded-full bg-blue-600/10 text-blue-500">
+                  <UserIcon size={18} />
+                </div>
+                <div>
+                  <h2 className="font-display font-bold text-base">Edit Profile Identity Settings</h2>
+                  <p className="text-xs text-slate-500">Modify your login particulars safely inside the secure interface.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleProfileUpdate} className="space-y-4">
+                {profileSuccess && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-lg flex items-center gap-2">
+                    <CheckCircle2 size={13} />
+                    <span>{profileSuccess}</span>
+                  </div>
+                )}
+                {profileError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-450 text-xs rounded-lg flex items-center gap-1.5 animate-shake">
+                    <AlertTriangle size={13} />
+                    <span>{profileError}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Full Legal Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-850 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Registered Gate Email ID</label>
+                  <input
+                    type="email"
+                    required
+                    value={profileEmail}
+                    onChange={(e) => setProfileEmail(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-855 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Update Security Password</label>
+                  <input
+                    type="password"
+                    placeholder="Leave blank to keep current password"
+                    value={profilePassword}
+                    onChange={(e) => setProfilePassword(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-855 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
+                  >
+                    Transmit Account updates
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* ========================================================
+          MODAL: BOOKING DURATION SELECTION MODAL
+         ======================================================== */}
+      {showBookingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className={`p-5 rounded-2xl border max-w-sm w-full transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="flex justify-between items-center border-b border-slate-800/10 pb-3 mb-4">
+              <div className="flex items-center gap-1.5">
+                <Car size={16} className="text-blue-500" />
+                <h3 className="font-display font-semibold text-sm">Lock Slot Reservation</h3>
+              </div>
+              <button 
+                onClick={() => setShowBookingModal(false)} 
+                className="p-1 hover:text-red-500 cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/10 flex justify-between items-center">
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Selected Slot Node</p>
+                  <p className="text-lg font-black font-mono text-slate-300 mt-0.5">{selectedSlot}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Hourly Rate Multiplier</p>
+                  <p className="text-sm font-bold text-emerald-500 mt-0.5">${config.hourlyRate.toFixed(2)}</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center text-xs mb-1">
+                  <span className="text-slate-500 font-medium">Reservation Duration Time</span>
+                  <span className="font-bold text-blue-500">{bookingMinutes} minutes</span>
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={120}
+                  step={10}
+                  value={bookingMinutes}
+                  onChange={(e) => setBookingMinutes(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono font-semibold mt-1">
+                  <span>10 mins</span>
+                  <span>1 hour</span>
+                  <span>2 hours</span>
+                </div>
+              </div>
+
+              {/* Subtotal preview math */}
+              <div className={`p-2.5 rounded-lg border flex justify-between items-center text-xs ${darkMode ? 'bg-slate-950/60 border-slate-805' : 'bg-slate-50 border-slate-350'}`}>
+                <span className="text-slate-500">Estimated Total Cost:</span>
+                <span className="font-bold font-mono text-sm text-emerald-500">
+                  ${((bookingMinutes / 60) * config.hourlyRate).toFixed(2)}
+                </span>
+              </div>
+
+              {bookingError && (
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-450 text-xs rounded-lg flex items-center gap-1.5">
+                  <AlertTriangle size={12} />
+                  <span>{bookingError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBookingModal(false)}
+                  className={`py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                    darkMode ? 'border-slate-800 text-slate-400 hover:text-slate-300' : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReservation}
+                  disabled={bookingInProcess}
+                  className="py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 shadow-md hover:shadow-blue-500/15 cursor-pointer"
+                >
+                  Confirm Lock
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL: LOGIN / REGISTER GATE MODAL
+         ======================================================== */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className={`p-6 rounded-2xl border max-w-sm w-full transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="flex justify-between items-center border-b border-slate-800/10 pb-3 mb-4">
+              <h3 className="font-display font-bold text-sm">
+                {authMode === 'login' ? 'Welcome Back Operator Sign In' : 'Operator Register Center'}
+              </h3>
+              <button 
+                onClick={() => setShowAuthModal(false)} 
+                className="p-1 hover:text-red-500 cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              {authError && (
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-450 text-xs rounded-lg flex items-center gap-1.5">
+                  <AlertTriangle size={12} className="shrink-0" />
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Full Operator Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    className={`w-full px-3 py-1.5 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Gate Email ID</label>
+                <input
+                  type="email"
+                  required
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className={`w-full px-3 py-1.5 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Passphrase Code</label>
+                <input
+                  type="password"
+                  required
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className={`w-full px-3 py-1.5 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-slate-100 border-slate-350 text-slate-900'}`}
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
+                >
+                  {authMode === 'login' ? 'Confirm Operator Entry' : 'Issue Credentials Node'}
+                </button>
+              </div>
+
+              <div className="text-center text-xs text-slate-500">
+                {authMode === 'login' ? (
+                  <p>
+                    New space user?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('register')}
+                      className="text-blue-500 hover:underline font-semibold cursor-pointer"
+                    >
+                      Create Credentials
+                    </button>
+                  </p>
+                ) : (
+                  <p>
+                    Already validated?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('login')}
+                      className="text-blue-500 hover:underline font-semibold cursor-pointer"
+                    >
+                      Sign In Now
+                    </button>
+                  </p>
+                )}
+              </div>
+            </form>
+
+            <div className="border-t border-slate-800/30 pt-4 mt-4 space-y-2">
+              <p className="text-[10px] text-center uppercase tracking-widest font-bold text-slate-500">Bypasses Shortcuts</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => handleQuickDemoLogin('user')}
+                  className="py-1 px-2 text-[10px] font-semibold rounded border border-slate-800 hover:bg-slate-850/50 flex align-center justify-center gap-1 cursor-pointer text-slate-400"
+                >
+                  <UserIcon size={11} className="mt-px" /> Demo User
+                </button>
+                <button
+                  onClick={() => handleQuickDemoLogin('admin')}
+                  className="py-1 px-2 text-[10px] font-semibold rounded bg-rose-600/10 border border-rose-500/20 text-rose-550 hover:bg-rose-600/20 flex align-center justify-center gap-1 cursor-pointer"
+                >
+                  <Shield size={11} className="mt-px" /> Demo Admin
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- Footer Signature --- */}
+      <footer className={`border-t py-6 text-center text-xs transition-colors ${darkMode ? 'border-slate-900 bg-slate-950 text-slate-500' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
+        <p>© 2026 ParkQuantum IoT Solutions. All rights reserved.</p>
+        <p className="text-[10px] text-slate-600 font-mono mt-1">Compiled securely under Express-Vite Fullstack environment • Port: 3000</p>
+      </footer>
+    </div>
+  );
+}
+
+// Subcomponent: Individual parking space deck slot node card
+function ParkingSlotCard({ slot, onClick }: { slot: ParkingSlot; onClick: (id: string) => void; key?: string }) {
+  // Styles based on status
+  const getStatusStyles = () => {
+    switch (slot.status) {
+      case 'available':
+        return {
+          bg: 'bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-500/30 hover:border-emerald-500/50',
+          badgeText: 'text-emerald-500',
+          badgeBg: 'bg-emerald-500/10',
+          borderAccent: 'border-emerald-500/50',
+          hoverState: 'cursor-pointer group'
+        };
+      case 'reserved':
+        return {
+          bg: 'bg-amber-500/10 border-amber-500/25',
+          badgeText: 'text-amber-500',
+          badgeBg: 'bg-amber-500/10',
+          borderAccent: 'border-amber-500/30',
+          hoverState: 'cursor-default opacity-85'
+        };
+      case 'occupied':
+        return {
+          bg: 'bg-red-500/10 border-red-500/25',
+          badgeText: 'text-red-500',
+          badgeBg: 'bg-red-500/10',
+          borderAccent: 'border-red-500/30',
+          hoverState: 'cursor-default opacity-85'
+        };
+    }
+  };
+
+  const style = getStatusStyles();
+
+  return (
+    <div 
+      onClick={() => slot.status === 'available' && onClick(slot.slot_id)}
+      className={`p-3 rounded-xl border text-left transition-all ${style.bg} ${style.hoverState}`}
+    >
+      <div className="flex justify-between items-start">
+        <span className="font-mono text-sm tracking-tight font-extrabold text-slate-300 bg-slate-950/40 px-1.5 py-0.5 rounded border border-slate-800/10">
+          {slot.slot_id}
+        </span>
+        <span className={`text-[8px] font-extrabold uppercase px-1 py-px rounded font-mono ${style.badgeText} ${style.badgeBg}`}>
+          {slot.status}
+        </span>
+      </div>
+
+      <p className="text-[10px] text-slate-500 mt-2 font-medium truncate" title={slot.location}>
+        {slot.location}
+      </p>
+
+      <div className="mt-3 flex items-center justify-between border-t border-slate-800/10 pt-2 flex-wrap gap-1">
+        {slot.status === 'available' ? (
+          <>
+            <span className="text-[8px] uppercase tracking-wider text-emerald-500 font-bold group-hover:underline flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Book Space
+            </span>
+            <ChevronRight size={10} className="text-emerald-500 font-bold transition-transform group-hover:translate-x-0.5" />
+          </>
+        ) : slot.status === 'reserved' ? (
+          <span className="text-[9px] text-amber-500 flex items-center gap-1 font-mono font-medium">
+            <Clock size={10} /> Locked / countdown
+          </span>
+        ) : (
+          <span className="text-[9px] text-red-500 flex items-center gap-1 font-mono font-medium">
+            <Car size={10} /> Vehicle parked
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

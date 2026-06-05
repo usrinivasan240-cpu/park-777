@@ -1,0 +1,6 @@
+{
+  "name": "Smart Parking System",
+  "description": "A full-stack smart parking management platform that coordinates real-time parking slot statuses, booking operations, QR code generation, and analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
