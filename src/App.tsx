@@ -46,6 +46,8 @@ import {
   Cell
 } from 'recharts';
 import { User, ParkingSlot, Booking, ParkingNotification, AdminStats } from './types';
+import { isFirebaseEnabled, db } from './firebase';
+import { onSnapshot, collection } from 'firebase/firestore';
 
 export default function App() {
   // --- States ---
@@ -97,6 +99,11 @@ export default function App() {
   const [simStatusMsg, setSimStatusMsg] = useState<{ text: string; type: 'success' | 'refused' } | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  // QR Scanner State
+  const [scanBookingId, setScanBookingId] = useState<string>('');
+  const [scanStatusMsg, setScanStatusMsg] = useState<{ text: string; type: 'success' | 'refused' } | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+
   // Appearance
   const [darkMode, setDarkMode] = useState<boolean>(
     localStorage.getItem('parking_theme') === 'dark' || true
@@ -119,6 +126,54 @@ export default function App() {
       setUser(null);
     }
   }, [token]);
+
+  // Real-time Firebase Sync (if enabled)
+  useEffect(() => {
+    if (!isFirebaseEnabled || !db) return;
+
+    // Listen to slots collection
+    const unsubSlots = onSnapshot(collection(db, 'slots'), (snapshot) => {
+      const slotsList = snapshot.docs.map(doc => doc.data() as ParkingSlot);
+      if (slotsList.length > 0) {
+        setSlots(slotsList);
+        setLastSynced(new Date());
+      }
+    });
+
+    // Listen to notifications collection
+    const unsubNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+      const notifsList = snapshot.docs.map(doc => doc.data() as ParkingNotification)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      if (notifsList.length > 0) {
+        setNotifications(notifsList);
+      }
+    });
+
+    // Listen to bookings collection
+    const unsubBookings = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+      const bookingsList = snapshot.docs.map(doc => doc.data() as Booking);
+      
+      // If user is admin, allBookings has everything
+      if (user?.role === 'admin') {
+        const sortedAll = [...bookingsList].sort((a, b) => new Date(b.booking_time).getTime() - new Date(a.booking_time).getTime());
+        setAllBookings(sortedAll);
+      }
+
+      // Filter local user history
+      if (user) {
+        const userHistory = bookingsList
+          .filter(b => b.user_id === user.id)
+          .sort((a, b) => new Date(b.booking_time).getTime() - new Date(a.booking_time).getTime());
+        setHistory(userHistory);
+      }
+    });
+
+    return () => {
+      unsubSlots();
+      unsubNotifs();
+      unsubBookings();
+    };
+  }, [isFirebaseEnabled, user]);
 
   // Unified Poller for real-time ESP32/Slots Updates
   const syncAllData = async () => {
@@ -453,6 +508,67 @@ export default function App() {
       });
     } finally {
       setIsSimulating(false);
+    }
+  };
+
+  const handleScanQR = async () => {
+    if (!scanBookingId.trim()) {
+      setScanStatusMsg({ text: 'Please enter a valid Booking Token or select one.', type: 'refused' });
+      return;
+    }
+    setIsScanning(true);
+    setScanStatusMsg(null);
+    try {
+      // Find the booking
+      const booking = allBookings.find((b: any) => b.booking_id.toUpperCase() === scanBookingId.trim().toUpperCase());
+      if (!booking) {
+        setScanStatusMsg({ text: `Invalid QR code: Booking "${scanBookingId}" not found in system logs.`, type: 'refused' });
+        setIsScanning(false);
+        return;
+      }
+
+      if (booking.status !== 'active') {
+        setScanStatusMsg({ text: `Rejected: Ticket is already ${booking.status.toUpperCase()}.`, type: 'refused' });
+        setIsScanning(false);
+        return;
+      }
+
+      // Find the slot to see if it is occupied or reserved
+      const slot = slots.find(s => s.slot_id === booking.slot_id);
+      if (!slot) {
+        setScanStatusMsg({ text: `Associated slot ${booking.slot_id} not found.`, type: 'refused' });
+        setIsScanning(false);
+        return;
+      }
+
+      const action = slot.status === 'reserved' ? 'car_arrive' : 'car_leave';
+
+      const res = await fetch('/api/esp32/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_id: booking.slot_id,
+          action: action
+        })
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        const statusVerb = action === 'car_arrive' ? 'CHECKED IN (Occupied)' : 'CHECKED OUT (Available)';
+        setScanStatusMsg({
+          text: `QR Scan Validated! Booking ${booking.booking_id} has been ${statusVerb} successfully at Slot ${booking.slot_id}.`,
+          type: 'success'
+        });
+        syncAllData();
+      } else {
+        setScanStatusMsg({
+          text: `Verification Refused: ${data.error || 'Failed to trigger gate status.'}`,
+          type: 'refused'
+        });
+      }
+    } catch (e) {
+      setScanStatusMsg({ text: 'Error communicating with validation server.', type: 'refused' });
+    } finally {
+      setIsScanning(false);
     }
   };
 
@@ -1075,109 +1191,111 @@ export default function App() {
             <div className="lg:col-span-4 space-y-6">
               
               {/* ESP32 Hardware Device Emulator Engine */}
-              <div className={`p-5 rounded-2xl border relative overflow-hidden transition-colors ${darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-200/40 border-slate-350 shadow-inner'}`}>
-                {/* Circuit Grid Decoration */}
-                <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full blur-xl pointer-events-none" />
-                <div className="absolute bottom-0 left-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-md pointer-events-none" />
+              {user?.role === 'admin' && (
+                <div className={`p-5 rounded-2xl border relative overflow-hidden transition-colors ${darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-200/40 border-slate-350 shadow-inner'}`}>
+                  {/* Circuit Grid Decoration */}
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full blur-xl pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-md pointer-events-none" />
 
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="p-1 px-1.5 rounded-md bg-blue-500/10 text-blue-500 text-[10px] font-bold font-mono uppercase tracking-widest flex items-center gap-1 border border-blue-500/20">
-                    <Cpu size={12} />
-                    IoT EMULATOR
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="p-1 px-1.5 rounded-md bg-blue-500/10 text-blue-500 text-[10px] font-bold font-mono uppercase tracking-widest flex items-center gap-1 border border-blue-500/20">
+                      <Cpu size={12} />
+                      IoT EMULATOR
+                    </div>
+                    <h4 className="text-xs font-mono font-bold text-slate-400">ESP32-WROOM-32</h4>
                   </div>
-                  <h4 className="text-xs font-mono font-bold text-slate-400">ESP32-WROOM-32</h4>
-                </div>
 
-                <h3 className="font-display font-semibold text-sm">ESP32 IR Sensor Array Emulator</h3>
-                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  Avoid setup barriers. Directly simulate physical infrared barrier gates & bumper distance-sensor triggers updating the system DB in real-time.
-                </p>
+                  <h3 className="font-display font-semibold text-sm">ESP32 IR Sensor Array Emulator</h3>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Avoid setup barriers. Directly simulate physical infrared barrier gates & bumper distance-sensor triggers updating the system DB in real-time.
+                  </p>
 
-                <div className="space-y-3.5 mt-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1">Target IoT Slot Node</label>
-                    <select
-                      value={simSlotId}
-                      onChange={(e) => setSimSlotId(e.target.value)}
-                      className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
+                  <div className="space-y-3.5 mt-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1">Target IoT Slot Node</label>
+                      <select
+                        value={simSlotId}
+                        onChange={(e) => setSimSlotId(e.target.value)}
+                        className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
+                      >
+                        {slots.map(s => (
+                          <option key={s.slot_id} value={s.slot_id}>
+                            {s.slot_id} — Current: [{s.status.toUpperCase()}]
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1.5">Action Trigger Type (Hardware signal)</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSimAction('car_arrive')}
+                          className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                            simAction === 'car_arrive'
+                              ? 'bg-red-500/10 border-red-500/50 text-red-500 shadow-sm'
+                              : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
+                          }`}
+                        >
+                          <Car size={13} className="shrink-0" />
+                          Car Arrives
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSimAction('car_leave')}
+                          className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                            simAction === 'car_leave'
+                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500 shadow-sm'
+                              : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
+                          }`}
+                        >
+                          <CheckCircle2 size={13} className="shrink-0" />
+                          Car Vaults (Leaves)
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleTransmitSimulate}
+                      disabled={isSimulating}
+                      className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:shadow-blue-500/10 disabled:opacity-50 transition-all cursor-pointer"
                     >
-                      {slots.map(s => (
-                        <option key={s.slot_id} value={s.slot_id}>
-                          {s.slot_id} — Current: [{s.status.toUpperCase()}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <Cpu size={14} className={isSimulating ? "animate-spin" : ""} />
+                      Transmit Sensors payload
+                    </button>
 
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1.5">Action Trigger Type (Hardware signal)</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSimAction('car_arrive')}
-                        className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
-                          simAction === 'car_arrive'
-                            ? 'bg-red-500/10 border-red-500/50 text-red-500 shadow-sm'
-                            : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
-                        }`}
-                      >
-                        <Car size={13} className="shrink-0" />
-                        Car Arrives
-                      </button>
+                    <AnimatePresence mode="wait">
+                      {simStatusMsg && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className={`p-3 rounded-lg border text-xs leading-relaxed flex items-start gap-2 ${
+                            simStatusMsg.type === 'success'
+                              ? `${darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50/75 border-emerald-200 text-emerald-700'}`
+                              : `${darkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-450' : 'bg-rose-50 border-rose-200 text-rose-700'}`
+                          }`}
+                        >
+                          {simStatusMsg.type === 'success' ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
+                          <span>{simStatusMsg.text}</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                      <button
-                        type="button"
-                        onClick={() => setSimAction('car_leave')}
-                        className={`py-2 px-3 rounded text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
-                          simAction === 'car_leave'
-                            ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-500 shadow-sm'
-                            : `${darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-350' : 'bg-white border-slate-300 text-slate-600'}`
-                        }`}
-                      >
-                        <CheckCircle2 size={13} className="shrink-0" />
-                        Car Vaults (Leaves)
-                      </button>
+                    {/* Business rules reference box */}
+                    <div className={`p-2.5 rounded-lg border text-[10px] text-slate-500 space-y-1 ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-white border-slate-200'}`}>
+                      <p className="font-semibold text-slate-400 flex items-center gap-1">
+                        <Sliders size={10} /> IoT Firmware Handcoded Gates:
+                      </p>
+                      <p>• Car Detection inside <b className="text-amber-500 font-medium">RESERVED</b> space updates status straight to <b className="text-red-500 font-medium">OCCUPIED</b>.</p>
+                      <p>• Vehicle vacating <b className="text-red-500 font-medium">OCCUPIED</b> space updates it clean back to <b className="text-emerald-500 font-medium font-bold">AVAILABLE</b>, setting active reservation booking complete.</p>
                     </div>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleTransmitSimulate}
-                    disabled={isSimulating}
-                    className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-md hover:shadow-blue-500/10 disabled:opacity-50 transition-all cursor-pointer"
-                  >
-                    <Cpu size={14} className={isSimulating ? "animate-spin" : ""} />
-                    Transmit Sensors payload
-                  </button>
-
-                  <AnimatePresence mode="wait">
-                    {simStatusMsg && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className={`p-3 rounded-lg border text-xs leading-relaxed flex items-start gap-2 ${
-                          simStatusMsg.type === 'success'
-                            ? `${darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50/75 border-emerald-200 text-emerald-700'}`
-                            : `${darkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-450' : 'bg-rose-50 border-rose-200 text-rose-700'}`
-                        }`}
-                      >
-                        {simStatusMsg.type === 'success' ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
-                        <span>{simStatusMsg.text}</span>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Business rules reference box */}
-                  <div className={`p-2.5 rounded-lg border text-[10px] text-slate-500 space-y-1 ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-white border-slate-200'}`}>
-                    <p className="font-semibold text-slate-400 flex items-center gap-1">
-                      <Sliders size={10} /> IoT Firmware Handcoded Gates:
-                    </p>
-                    <p>• Car Detection inside <b className="text-amber-500 font-medium">RESERVED</b> space updates status straight to <b className="text-red-500 font-medium">OCCUPIED</b>.</p>
-                    <p>• Vehicle vacating <b className="text-red-500 font-medium">OCCUPIED</b> space updates it clean back to <b className="text-emerald-500 font-medium font-bold">AVAILABLE</b>, setting active reservation booking complete.</p>
-                  </div>
                 </div>
-              </div>
+              )}
 
               {/* System Live Notification Center */}
               <div className={`p-5 rounded-2xl border transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -1502,55 +1620,127 @@ export default function App() {
 
             {/* Inventory Management & System Setup Configurations Router */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
-              {/* Global Config setup sliders (Col span 4) */}
-              <div className={`lg:col-span-4 p-5 rounded-xl border space-y-4 h-fit transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                <div className="flex items-center gap-1.5 border-b border-slate-800/10 pb-2.5">
-                  <Settings size={14} className="text-blue-500" />
-                  <h3 className="font-display font-semibold text-sm">Operator Global Parameters</h3>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between items-center text-xs mb-1">
-                      <span className="text-slate-500">Hourly Multiplier (Price calculated)</span>
-                      <span className="font-bold text-blue-500">${editRate}/hr</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={20}
-                      step={0.5}
-                      value={editRate}
-                      onChange={(e) => setEditRate(Number(e.target.value))}
-                      className="w-full"
-                    />
+              {/* Left Column: Global Config & QR Scanner (Col span 4) */}
+              <div className="lg:col-span-4 flex flex-col gap-6">
+                
+                {/* Global Config setup sliders */}
+                <div className={`p-5 rounded-xl border space-y-4 h-fit transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <div className="flex items-center gap-1.5 border-b border-slate-800/10 pb-2.5">
+                    <Settings size={14} className="text-blue-500" />
+                    <h3 className="font-display font-semibold text-sm">Operator Global Parameters</h3>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center text-xs mb-1">
-                      <span className="text-slate-500">IoT Auto Grace Expiry Period</span>
-                      <span className="font-bold text-amber-500">{editGrace} minutes</span>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center text-xs mb-1">
+                        <span className="text-slate-500">Hourly Multiplier (Price calculated)</span>
+                        <span className="font-bold text-blue-500">${editRate}/hr</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={20}
+                        step={0.5}
+                        value={editRate}
+                        onChange={(e) => setEditRate(Number(e.target.value))}
+                        className="w-full"
+                      />
                     </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={15}
-                      step={1}
-                      value={editGrace}
-                      onChange={(e) => setEditGrace(Number(e.target.value))}
-                      className="w-full"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-0.5">Time allotted for ESP32 sensors to record check-in arrival before auto-vandalizing bookings.</p>
+
+                    <div>
+                      <div className="flex justify-between items-center text-xs mb-1">
+                        <span className="text-slate-500">IoT Auto Grace Expiry Period</span>
+                        <span className="font-bold text-amber-500">{editGrace} minutes</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={15}
+                        step={1}
+                        value={editGrace}
+                        onChange={(e) => setEditGrace(Number(e.target.value))}
+                        className="w-full"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-0.5">Time allotted for ESP32 sensors to record check-in arrival before auto-vandalizing bookings.</p>
+                    </div>
+
+                    <button
+                      onClick={handleUpdateConfig}
+                      className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                      Commit Parameters to System
+                    </button>
+                  </div>
+                </div>
+
+                {/* Smart QR Ticket Scanner Simulator */}
+                <div className={`p-5 rounded-xl border space-y-4 h-fit transition-colors ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <div className="flex items-center gap-1.5 border-b border-slate-800/10 pb-2.5">
+                    <QrCode size={14} className="text-rose-500" />
+                    <h3 className="font-display font-semibold text-sm">Smart QR Ticket Scanner</h3>
                   </div>
 
-                  <button
-                    onClick={handleUpdateConfig}
-                    className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold uppercase tracking-wider cursor-pointer"
-                  >
-                    Commit Parameters to System
-                  </button>
+                  <div className="space-y-4">
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Emulate gate barcode/QR code scanners. Enter or select a booking token ID below to scan and automatically process vehicle check-in or checkout gates.
+                    </p>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1">Select Active Booking QR</label>
+                      <select
+                        value={scanBookingId}
+                        onChange={(e) => setScanBookingId(e.target.value)}
+                        className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
+                      >
+                        <option value="">-- Choose Active Ticket --</option>
+                        {allBookings.filter((b: any) => b.status === 'active').map((b: any) => (
+                          <option key={b.booking_id} value={b.booking_id}>
+                            {b.booking_id} ({b.user_name} - Slot {b.slot_id})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold">Or enter manually:</span>
+                      <input
+                        type="text"
+                        placeholder="e.g. BK-1001"
+                        value={scanBookingId}
+                        onChange={(e) => setScanBookingId(e.target.value)}
+                        className={`px-2 py-1 rounded text-xs w-28 text-center focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleScanQR}
+                      disabled={isScanning}
+                      className="w-full py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <QrCode size={14} className={isScanning ? "animate-pulse" : ""} />
+                      {isScanning ? "Scanning Pass..." : "Validate & Scan QR Ticket"}
+                    </button>
+
+                    <AnimatePresence mode="wait">
+                      {scanStatusMsg && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className={`p-3 rounded-lg border text-xs leading-relaxed flex items-start gap-2 ${
+                            scanStatusMsg.type === 'success'
+                              ? `${darkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50/75 border-emerald-200 text-emerald-700'}`
+                              : `${darkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-450' : 'bg-rose-50 border-rose-200 text-rose-700'}`
+                          }`}
+                        >
+                          {scanStatusMsg.type === 'success' ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
+                          <span>{scanStatusMsg.text}</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
+
               </div>
 
               {/* Roster Slots Addition Inventory (Col span 8) */}

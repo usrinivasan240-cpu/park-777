@@ -4,6 +4,40 @@ import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { User, ParkingSlot, Booking, ParkingNotification, AdminStats, SlotStatus, BookingStatus } from "./src/types";
+import dotenv from "dotenv";
+import admin from "firebase-admin";
+
+dotenv.config();
+
+let dbFirestore: any = null;
+let firebaseAdminEnabled = false;
+
+try {
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || path.join(process.cwd(), "service-account.json");
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+
+  if (fs.existsSync(serviceAccountPath)) {
+    admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8")))
+    });
+    dbFirestore = admin.firestore();
+    dbFirestore.settings({ ignoreUndefinedProperties: true });
+    firebaseAdminEnabled = true;
+    console.log("[FIREBASE] Admin SDK initialized via Service Account JSON file.");
+  } else if (projectId) {
+    admin.initializeApp({
+      projectId: projectId
+    });
+    dbFirestore = admin.firestore();
+    dbFirestore.settings({ ignoreUndefinedProperties: true });
+    firebaseAdminEnabled = true;
+    console.log("[FIREBASE] Admin SDK initialized via Project ID.");
+  } else {
+    console.log("[FIREBASE] Configuration not found. Running in local JSON database fallback mode.");
+  }
+} catch (e) {
+  console.error("[FIREBASE] Admin SDK failed to initialize:", e);
+}
 
 const app = express();
 const PORT = 3000;
@@ -150,6 +184,31 @@ function loadDB(): DB {
 function saveDB(db: DB) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), "utf-8");
+    if (firebaseAdminEnabled && dbFirestore) {
+      console.log("[FIREBASE] Syncing database state to Firestore...");
+      (async () => {
+        try {
+          const batch = dbFirestore.batch();
+          db.slots.forEach(slot => {
+            batch.set(dbFirestore.collection("slots").doc(slot.slot_id), slot);
+          });
+          db.bookings.forEach(booking => {
+            batch.set(dbFirestore.collection("bookings").doc(booking.booking_id), booking);
+          });
+          db.notifications.forEach(notif => {
+            batch.set(dbFirestore.collection("notifications").doc(notif.id), notif);
+          });
+          batch.set(dbFirestore.collection("config").doc("global"), db.config);
+          await batch.commit();
+          console.log("[FIREBASE] Firestore database sync complete!");
+        } catch (err: any) {
+          console.error("[FIREBASE] Firestore sync failed. Disabling admin sync until credentials are set:", err.message);
+          firebaseAdminEnabled = false;
+        }
+      })();
+    } else {
+      console.log("[FIREBASE] Admin sync skipped. firebaseAdminEnabled:", firebaseAdminEnabled);
+    }
   } catch (err) {
     console.error("Failed to write to database file", err);
   }
@@ -157,6 +216,7 @@ function saveDB(db: DB) {
 
 // --- Init State ---
 let dbState = loadDB();
+saveDB(dbState);
 
 // Add helper to create notification
 function addNotification(title: string, message: string, type: 'success' | 'warning' | 'info') {
@@ -842,7 +902,7 @@ if (process.env.NODE_ENV !== "production") {
     app.use(vite.middlewares);
     
     // Fallback error catching
-    app.listen(PORT, "0.0.0.0", () => {
+    app.listen(PORT, "localhost", () => {
       console.log(`[DEV SERVER] Listening securely at http://localhost:${PORT}`);
     });
   });
@@ -854,7 +914,7 @@ if (process.env.NODE_ENV !== "production") {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[PROD SERVER] Listening securely at http://0.0.0.0:${PORT}`);
+  app.listen(PORT, "localhost", () => {
+    console.log(`[PROD SERVER] Listening securely at http://localhost:${PORT}`);
   });
 }
