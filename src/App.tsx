@@ -2636,23 +2636,7 @@ export default function App() {
               </div>
             </form>
 
-            <div className="border-t border-slate-800/30 pt-4 mt-4 space-y-2">
-              <p className="text-[10px] text-center uppercase tracking-widest font-bold text-slate-500">Bypasses Shortcuts</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleQuickDemoLogin('user')}
-                  className="py-1 px-2 text-[10px] font-semibold rounded border border-slate-800 hover:bg-slate-850/50 flex align-center justify-center gap-1 cursor-pointer text-slate-400"
-                >
-                  <UserIcon size={11} className="mt-px" /> Demo User
-                </button>
-                <button
-                  onClick={() => handleQuickDemoLogin('admin')}
-                  className="py-1 px-2 text-[10px] font-semibold rounded bg-rose-600/10 border border-rose-500/20 text-rose-550 hover:bg-rose-600/20 flex align-center justify-center gap-1 cursor-pointer"
-                >
-                  <Shield size={11} className="mt-px" /> Demo Admin
-                </button>
-              </div>
-            </div>
+
 
           </div>
         </div>
