@@ -46,8 +46,9 @@ import {
   Cell
 } from 'recharts';
 import { User, ParkingSlot, Booking, ParkingNotification, AdminStats } from './types';
-import { isFirebaseEnabled, db } from './firebase';
-import { onSnapshot, collection } from 'firebase/firestore';
+import { isFirebaseEnabled, db, auth } from './firebase';
+import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as fbSignOut } from 'firebase/auth';
 
 export default function App() {
   // --- States ---
@@ -272,6 +273,27 @@ export default function App() {
   }
 
   const fetchUserProfile = async () => {
+    if (isFirebaseEnabled && auth) {
+      auth.onAuthStateChanged((fbUser: any) => {
+        if (fbUser) {
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          const profile = {
+            id: fbUser.uid,
+            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+            email: fbUser.email || '',
+            role: userRole
+          };
+          setUser(profile);
+          setProfileName(profile.name);
+          setProfileEmail(profile.email);
+        } else {
+          setUser(null);
+          setToken(null);
+        }
+      });
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/me', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -282,7 +304,6 @@ export default function App() {
         setProfileName(data.name);
         setProfileEmail(data.email);
       } else {
-        // Stale or bad token
         handleSignOut();
       }
     } catch (e) {
@@ -294,6 +315,60 @@ export default function App() {
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+
+    if (isFirebaseEnabled && auth) {
+      try {
+        if (authMode === 'login') {
+          const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
+          const fbUser = userCredential.user;
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          
+          const profile = {
+            id: fbUser.uid,
+            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+            email: fbUser.email || authEmail,
+            role: userRole
+          };
+          
+          setUser(profile);
+          const mockToken = fbUser.uid;
+          localStorage.setItem('parking_token', mockToken);
+          setToken(mockToken);
+          setShowAuthModal(false);
+          setAuthEmail('');
+          setAuthPassword('');
+          setAuthName('');
+        } else {
+          const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+          const fbUser = userCredential.user;
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          
+          const profile = {
+            id: fbUser.uid,
+            name: authName || fbUser.email?.split('@')[0] || 'User',
+            email: fbUser.email || authEmail,
+            role: userRole
+          };
+          
+          if (db) {
+            await setDoc(doc(db, 'users', fbUser.uid), profile);
+          }
+
+          setUser(profile);
+          const mockToken = fbUser.uid;
+          localStorage.setItem('parking_token', mockToken);
+          setToken(mockToken);
+          setShowAuthModal(false);
+          setAuthEmail('');
+          setAuthPassword('');
+          setAuthName('');
+        }
+      } catch (err: any) {
+        setAuthError(err.message || 'Firebase Authentication failed.');
+      }
+      return;
+    }
+
     const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
     const payload = authMode === 'login' 
       ? { email: authEmail, password: authPassword }
@@ -316,7 +391,6 @@ export default function App() {
         setAuthEmail('');
         setAuthPassword('');
         setAuthName('');
-        // Sync straight away
         setTimeout(() => syncAllData(), 300);
       }
     } catch (err) {
@@ -325,6 +399,9 @@ export default function App() {
   };
 
   const handleSignOut = () => {
+    if (isFirebaseEnabled && auth) {
+      fbSignOut(auth).catch(console.error);
+    }
     localStorage.removeItem('parking_token');
     setToken(null);
     setUser(null);
@@ -339,6 +416,49 @@ export default function App() {
     const email = role === 'admin' ? 'admin@example.com' : 'user@example.com';
     const password = role === 'admin' ? 'admin123' : 'password123';
     
+    if (isFirebaseEnabled && auth) {
+      try {
+        let userCredential;
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, email, password);
+        } catch (signInErr: any) {
+          if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/invalid-email') {
+            userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          } else {
+            throw signInErr;
+          }
+        }
+        
+        const fbUser = userCredential.user;
+        const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+        
+        const profile = {
+          id: fbUser.uid,
+          name: role === 'admin' ? 'Demo Admin' : 'Demo User',
+          email: fbUser.email || email,
+          role: userRole
+        };
+
+        setUser(profile);
+        const mockToken = fbUser.uid;
+        localStorage.setItem('parking_token', mockToken);
+        setToken(mockToken);
+        setShowAuthModal(false);
+        setAuthEmail('');
+        setAuthPassword('');
+        setAuthName('');
+        
+        if (role === 'admin') {
+          setActiveTab('admin');
+        } else {
+          setActiveTab('parking');
+        }
+      } catch (err: any) {
+        setAuthError(err.message || 'Firebase Demo login failed.');
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -351,7 +471,6 @@ export default function App() {
         setToken(data.token);
         setUser(data.user);
         setShowAuthModal(false);
-        // Switch view context dynamically
         if (role === 'admin') {
           setActiveTab('admin');
         } else {
@@ -425,6 +544,54 @@ export default function App() {
     setBookingInProcess(true);
     setBookingError('');
 
+    if (isFirebaseEnabled && db && user) {
+      try {
+        const bookingId = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
+        const expiry = new Date(Date.now() + (bookingMinutes + config.gracePeriodMinutes) * 60000);
+        
+        const newBooking: Booking = {
+          booking_id: bookingId,
+          user_id: user.id,
+          slot_id: selectedSlot,
+          booking_time: new Date().toISOString(),
+          expiry_time: expiry.toISOString(),
+          status: 'active',
+          qr_code: `BK-QR-${bookingId}-${selectedSlot}-${user.id}`
+        };
+
+        const slot = slots.find(s => s.slot_id === selectedSlot);
+        if (slot) {
+          const updatedSlot = {
+            ...slot,
+            status: 'reserved' as const,
+            current_booking_id: bookingId,
+            assigned_user_id: user.id,
+            last_updated: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'slots', selectedSlot), updatedSlot);
+        }
+        
+        await setDoc(doc(db, 'bookings', bookingId), newBooking);
+        
+        const newNotif = {
+          id: `notif_${Date.now()}`,
+          title: "Booking Confirmed!",
+          message: `Slot ${selectedSlot} is reserved for you. Drive over! Your grace period expires strictly at ${expiry.toLocaleTimeString()}`,
+          timestamp: new Date().toISOString(),
+          type: 'success' as const,
+          read: false
+        };
+        await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+
+        setShowBookingModal(false);
+      } catch (err: any) {
+        setBookingError(err.message || 'Failed to complete booking reservation.');
+      } finally {
+        setBookingInProcess(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/parking/book', {
         method: 'POST',
@@ -440,7 +607,6 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         setShowBookingModal(false);
-        // Refresh values immediately
         syncAllData();
       } else {
         setBookingError(data.error || 'Failed to complete booking reservation.');
@@ -454,6 +620,34 @@ export default function App() {
 
   const handleCancelBooking = async (bookingId: string) => {
     if (!confirm('Are you absolutely sure you want to cancel this booking and surrender your parking space?')) return;
+
+    if (isFirebaseEnabled && db) {
+      try {
+        const booking = allBookings.find(b => b.booking_id === bookingId) || history.find(b => b.booking_id === bookingId);
+        if (booking) {
+          await setDoc(doc(db, 'bookings', bookingId), {
+            ...booking,
+            status: 'cancelled' as const
+          });
+
+          const slot = slots.find(s => s.slot_id === booking.slot_id);
+          if (slot && slot.current_booking_id === bookingId) {
+            const updatedSlot = {
+              ...slot,
+              status: 'available' as const,
+              current_booking_id: undefined,
+              assigned_user_id: undefined,
+              last_updated: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'slots', booking.slot_id), updatedSlot);
+          }
+        }
+      } catch (err: any) {
+        alert(err.message || 'Failed to cancel booking.');
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/parking/cancel', {
         method: 'POST',
@@ -479,6 +673,79 @@ export default function App() {
     setIsSimulating(true);
     setSimStatusMsg(null);
     try {
+      const uSlotId = simSlotId.toUpperCase();
+      let status: 'occupied' | 'available' | 'reserved' = 'available';
+      if (simAction === "car_arrive") {
+        status = "occupied";
+      } else if (simAction === "car_leave") {
+        status = "available";
+      } else if (simAction === "reserve") {
+        status = "reserved";
+      }
+
+      if (isFirebaseEnabled && db) {
+        const slotRef = doc(db, 'slots', uSlotId);
+        const slotObj = slots.find(s => s.slot_id === uSlotId);
+        const prevStatus = slotObj ? slotObj.status : 'available';
+
+        let updateData: any = {
+          status: status,
+          last_updated: new Date().toISOString()
+        };
+
+        let notifTitle = '';
+        let notifMsg = '';
+        let notifType: 'success' | 'warning' | 'info' = 'info';
+
+        if (status === "occupied") {
+          if (prevStatus === "reserved") {
+            notifTitle = "[ESP32 Sensor] Arrived";
+            notifMsg = `Check-in successful! Car detected at Reserved space ${uSlotId}.`;
+            notifType = "success";
+          } else {
+            notifTitle = "[ESP32 Sensor] Rogue Vehicle Detected";
+            notifMsg = `Rogue car docked straight into empty Slot ${uSlotId}!`;
+            notifType = "warning";
+          }
+        } else if (status === "available") {
+          const bookingId = slotObj?.current_booking_id;
+          if (bookingId) {
+            const bookingRef = doc(db, 'bookings', bookingId);
+            await setDoc(bookingRef, { status: 'completed' }, { merge: true });
+            
+            notifTitle = "[ESP32 Sensor] Departed";
+            notifMsg = `Car left Slot ${uSlotId}. Booking verified complete.`;
+            notifType = "success";
+          } else {
+            notifTitle = "[ESP32 Sensor] Slot Available";
+            notifMsg = `Sensor reports Slot ${uSlotId} is clear and open.`;
+            notifType = "info";
+          }
+          updateData.current_booking_id = null;
+          updateData.assigned_user_id = null;
+        }
+
+        await setDoc(slotRef, updateData, { merge: true });
+
+        if (notifTitle) {
+          const newNotif = {
+            id: `notif_${Date.now()}`,
+            title: notifTitle,
+            message: notifMsg,
+            timestamp: new Date().toISOString(),
+            type: notifType,
+            read: false
+          };
+          await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+        }
+
+        setSimStatusMsg({
+          text: `ESP-NOW Transmit Successful: Slot ${uSlotId} status updated to [${status.toUpperCase()}].`,
+          type: 'success'
+        });
+        return;
+      }
+
       const res = await fetch('/api/esp32/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -543,6 +810,59 @@ export default function App() {
 
       const action = slot.status === 'reserved' ? 'car_arrive' : 'car_leave';
 
+      if (isFirebaseEnabled && db) {
+        const uSlotId = booking.slot_id;
+        const slotRef = doc(db, 'slots', uSlotId);
+        
+        let newStatus: 'occupied' | 'available' = action === 'car_arrive' ? 'occupied' : 'available';
+        let updateData: any = {
+          status: newStatus,
+          last_updated: new Date().toISOString()
+        };
+
+        let notifTitle = '';
+        let notifMsg = '';
+        let notifType: 'success' | 'warning' | 'info' = 'info';
+
+        if (newStatus === "occupied") {
+          notifTitle = "[ESP32 Sensor] Arrived";
+          notifMsg = `Check-in successful! Car detected at Reserved space ${uSlotId}.`;
+          notifType = "success";
+        } else {
+          const bookingRef = doc(db, 'bookings', booking.booking_id);
+          await setDoc(bookingRef, { status: 'completed' }, { merge: true });
+
+          notifTitle = "[ESP32 Sensor] Departed";
+          notifMsg = `Car left Slot ${uSlotId}. Booking verified complete.`;
+          notifType = "success";
+          
+          updateData.current_booking_id = null;
+          updateData.assigned_user_id = null;
+        }
+
+        await setDoc(slotRef, updateData, { merge: true });
+
+        if (notifTitle) {
+          const newNotif = {
+            id: `notif_${Date.now()}`,
+            title: notifTitle,
+            message: notifMsg,
+            timestamp: new Date().toISOString(),
+            type: notifType,
+            read: false
+          };
+          await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+        }
+
+        const statusVerb = action === 'car_arrive' ? 'CHECKED IN (Occupied)' : 'CHECKED OUT (Available)';
+        setScanStatusMsg({
+          text: `QR Scan Validated! Booking ${booking.booking_id} has been ${statusVerb} successfully at Slot ${booking.slot_id}.`,
+          type: 'success'
+        });
+        setIsScanning(false);
+        return;
+      }
+
       const res = await fetch('/api/esp32/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -572,12 +892,41 @@ export default function App() {
     }
   };
 
+
   // --- Admin Roster & Configurations Handlers ---
   const handleAddSlot = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminSlotError('');
     if (!newSlotId || !newSlotLoc) {
       setAdminSlotError('Fill in clean values.');
+      return;
+    }
+
+    if (isFirebaseEnabled && db) {
+      try {
+        const uSlotId = newSlotId.toUpperCase();
+        const newSlotObj = {
+          slot_id: uSlotId,
+          status: 'available' as const,
+          location: newSlotLoc
+        };
+        await setDoc(doc(db, 'slots', uSlotId), newSlotObj);
+        
+        const newNotif = {
+          id: `notif_${Date.now()}`,
+          title: "Slot Inventory Added",
+          message: `Slot ${uSlotId} successfully added to standard parking roster.`,
+          timestamp: new Date().toISOString(),
+          type: 'success' as const,
+          read: false
+        };
+        await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+
+        setNewSlotId('');
+        setNewSlotLoc('');
+      } catch (err: any) {
+        setAdminSlotError(err.message || 'Failed to add slot to Firebase.');
+      }
       return;
     }
 
@@ -605,6 +954,16 @@ export default function App() {
 
   const handleDeleteSlot = async (slotId: string) => {
     if (!confirm(`Confirm absolute deletion of slot node ${slotId} from system index?`)) return;
+
+    if (isFirebaseEnabled && db) {
+      try {
+        await deleteDoc(doc(db, 'slots', slotId));
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete slot from Firebase.');
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`/api/admin/slots/${slotId}`, {
         method: 'DELETE',
