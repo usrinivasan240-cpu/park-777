@@ -1598,7 +1598,7 @@ export default function App() {
                         {/* Floor Label */}
                         <div className="flex justify-between items-center px-2 mb-2">
                           <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500">DECK LEVEL 1 — FRONT & EAST GATEWAY</span>
-                          <span className="text-[10px] text-slate-500 font-mono">Sensors active: {slots.filter(s => (s.location || '').toLowerCase().includes('floor 1')).length} nodes</span>
+                          <span className="text-[10px] text-slate-500 font-mono">Sensors active: {slots.filter(s => (s.location || '').toLowerCase().includes('floor 1') || s.slot_id.toUpperCase().startsWith('A') || s.slot_id.toUpperCase().startsWith('B')).length} nodes</span>
                         </div>
 
                         {/* Layout grid containing slots & road lanes */}
@@ -1607,10 +1607,10 @@ export default function App() {
                           {/* Left Slots lane A */}
                           <div className="col-span-5 grid grid-cols-3 gap-2.5">
                             {filteredSlots
-                              .filter(s => (s.location || '').toLowerCase().includes('floor 1') && s.slot_id.startsWith('A'))
+                              .filter(s => s.slot_id.toUpperCase().startsWith('A'))
                               .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
                             }
-                            {filteredSlots.filter(s => (s.location || '').toLowerCase().includes('floor 1') && s.slot_id.startsWith('A')).length === 0 && (
+                            {filteredSlots.filter(s => s.slot_id.toUpperCase().startsWith('A')).length === 0 && (
                               <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
                             )}
                           </div>
@@ -1627,10 +1627,10 @@ export default function App() {
                           {/* Right Slots lane B */}
                           <div className="col-span-5 grid grid-cols-3 gap-2.5">
                             {filteredSlots
-                              .filter(s => (s.location || '').toLowerCase().includes('floor 1') && s.slot_id.startsWith('B'))
+                              .filter(s => s.slot_id.toUpperCase().startsWith('B'))
                               .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
                             }
-                            {filteredSlots.filter(s => (s.location || '').toLowerCase().includes('floor 1') && s.slot_id.startsWith('B')).length === 0 && (
+                            {filteredSlots.filter(s => s.slot_id.toUpperCase().startsWith('B')).length === 0 && (
                               <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
                             )}
                           </div>
@@ -1652,7 +1652,7 @@ export default function App() {
                         {/* Floor Label */}
                         <div className="flex justify-between items-center px-2 mb-2">
                           <span className="text-[10px] font-bold font-mono tracking-widest text-slate-500">DECK LEVEL 2 — TERRACE LANES</span>
-                          <span className="text-[10px] text-slate-500 font-mono font-medium">Sensors active: {slots.filter(s => (s.location || '').toLowerCase().includes('floor 2')).length} nodes</span>
+                          <span className="text-[10px] text-slate-500 font-mono font-medium">Sensors active: {slots.filter(s => (s.location || '').toLowerCase().includes('floor 2') || s.slot_id.toUpperCase().startsWith('C')).length} nodes</span>
                         </div>
 
                         {/* Layout grid containing slots & road lanes */}
@@ -1661,11 +1661,11 @@ export default function App() {
                           {/* West Slots Lane */}
                           <div className="col-span-5 grid grid-cols-3 gap-2.5">
                             {filteredSlots
-                              .filter(s => (s.location || '').toLowerCase().includes('floor 2'))
+                              .filter(s => s.slot_id.toUpperCase().startsWith('C'))
                               .slice(0, 3)
                               .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
                             }
-                            {filteredSlots.filter(s => (s.location || '').toLowerCase().includes('floor 2')).length === 0 && (
+                            {filteredSlots.filter(s => s.slot_id.toUpperCase().startsWith('C')).length === 0 && (
                               <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
                             )}
                           </div>
@@ -1682,11 +1682,11 @@ export default function App() {
                           {/* East Slots Lane */}
                           <div className="col-span-5 grid grid-cols-3 gap-2.5">
                             {filteredSlots
-                              .filter(s => (s.location || '').toLowerCase().includes('floor 2'))
+                              .filter(s => s.slot_id.toUpperCase().startsWith('C'))
                               .slice(3)
                               .map(s => <ParkingSlotCard key={s.slot_id} slot={s} onClick={handleOpenBooking} />)
                             }
-                            {filteredSlots.filter(s => (s.location || '').toLowerCase().includes('floor 2')).slice(3).length === 0 && (
+                            {filteredSlots.filter(s => s.slot_id.toUpperCase().startsWith('C')).slice(3).length === 0 && (
                               <div className="col-span-3 py-4 text-center text-xs text-slate-500 border border-slate-800 border-dashed rounded">None found</div>
                             )}
                           </div>
