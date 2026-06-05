@@ -135,8 +135,26 @@ export default function App() {
     // Listen to slots collection
     const unsubSlots = onSnapshot(collection(db, 'slots'), (snapshot) => {
       const slotsList = snapshot.docs.map(doc => doc.data() as ParkingSlot);
-      if (slotsList.length > 0) {
+      if (snapshot.size > 0) {
         setSlots(slotsList);
+        setLastSynced(new Date());
+      } else {
+        // Auto-populate Firestore with standard slots if empty
+        const defaultSlots: ParkingSlot[] = [
+          { slot_id: "A1", status: "available", location: "Floor 1 - Main Front" },
+          { slot_id: "A2", status: "available", location: "Floor 1 - Main Front" },
+          { slot_id: "A3", status: "available", location: "Floor 1 - Main Front" },
+          { slot_id: "B1", status: "available", location: "Floor 1 - East Wing" },
+          { slot_id: "B2", status: "available", location: "Floor 1 - East Wing" },
+          { slot_id: "B3", status: "available", location: "Floor 1 - East Wing" },
+          { slot_id: "C1", status: "available", location: "Floor 2 - Terrace" },
+          { slot_id: "C2", status: "available", location: "Floor 2 - Terrace" },
+          { slot_id: "C3", status: "available", location: "Floor 2 - Terrace" }
+        ];
+        defaultSlots.forEach(s => {
+          setDoc(doc(db, 'slots', s.slot_id), s).catch(console.error);
+        });
+        setSlots(defaultSlots);
         setLastSynced(new Date());
       }
     });
