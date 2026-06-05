@@ -399,7 +399,7 @@ export default function App() {
     if (isFirebaseEnabled && auth) {
       auth.onAuthStateChanged((fbUser: any) => {
         if (fbUser) {
-          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'sriadmin@gmail.com') ? 'admin' : 'user';
           const profile = {
             id: fbUser.uid,
             name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
@@ -444,7 +444,7 @@ export default function App() {
         if (authMode === 'login') {
           const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
           const fbUser = userCredential.user;
-          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'sriadmin@gmail.com') ? 'admin' : 'user';
           
           const profile = {
             id: fbUser.uid,
@@ -464,7 +464,7 @@ export default function App() {
         } else {
           const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
           const fbUser = userCredential.user;
-          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'sriadmin@gmail.com') ? 'admin' : 'user';
           
           const profile = {
             id: fbUser.uid,
