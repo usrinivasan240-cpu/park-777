@@ -134,7 +134,13 @@ export default function App() {
 
     // Listen to slots collection
     const unsubSlots = onSnapshot(collection(db, 'slots'), (snapshot) => {
-      const slotsList = snapshot.docs.map(doc => doc.data() as ParkingSlot);
+      const slotsList = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          slot_id: doc.id
+        } as ParkingSlot;
+      });
       if (snapshot.size > 0) {
         setSlots(slotsList);
         setLastSynced(new Date());
@@ -163,8 +169,13 @@ export default function App() {
 
     // Listen to notifications collection
     const unsubNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
-      const notifsList = snapshot.docs.map(doc => doc.data() as ParkingNotification)
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const notifsList = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          id: doc.id
+        } as ParkingNotification;
+      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       if (notifsList.length > 0) {
         setNotifications(notifsList);
       }
@@ -174,7 +185,13 @@ export default function App() {
 
     // Listen to bookings collection
     const unsubBookings = onSnapshot(collection(db, 'bookings'), (snapshot) => {
-      const bookingsList = snapshot.docs.map(doc => doc.data() as Booking);
+      const bookingsList = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          booking_id: doc.id
+        } as Booking;
+      });
       
       // If user is admin, allBookings has everything
       if (user?.role === 'admin') {
@@ -382,7 +399,7 @@ export default function App() {
     if (isFirebaseEnabled && auth) {
       auth.onAuthStateChanged((fbUser: any) => {
         if (fbUser) {
-          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
           const profile = {
             id: fbUser.uid,
             name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
@@ -427,7 +444,7 @@ export default function App() {
         if (authMode === 'login') {
           const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
           const fbUser = userCredential.user;
-          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
           
           const profile = {
             id: fbUser.uid,
@@ -447,7 +464,7 @@ export default function App() {
         } else {
           const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
           const fbUser = userCredential.user;
-          const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
+          const userRole = (fbUser.email === 'watson777@gmail.com') ? 'admin' : 'user';
           
           const profile = {
             id: fbUser.uid,
@@ -517,81 +534,8 @@ export default function App() {
     setActiveTab('parking');
   };
 
-  const handleQuickDemoLogin = async (role: 'user' | 'admin') => {
-    setAuthError('');
-    const email = role === 'admin' ? 'admin@example.com' : 'user@example.com';
-    const password = role === 'admin' ? 'admin123' : 'password123';
-    
-    if (isFirebaseEnabled && auth) {
-      try {
-        let userCredential;
-        try {
-          userCredential = await signInWithEmailAndPassword(auth, email, password);
-        } catch (signInErr: any) {
-          if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/invalid-email') {
-            userCredential = await createUserWithEmailAndPassword(auth, email, password);
-          } else {
-            throw signInErr;
-          }
-        }
-        
-        const fbUser = userCredential.user;
-        const userRole = (fbUser.email === 'watson777@gmail.com' || fbUser.email === 'admin@example.com') ? 'admin' : 'user';
-        
-        const profile = {
-          id: fbUser.uid,
-          name: role === 'admin' ? 'Demo Admin' : 'Demo User',
-          email: fbUser.email || email,
-          role: userRole
-        };
-
-        setUser(profile);
-        const mockToken = fbUser.uid;
-        localStorage.setItem('parking_token', mockToken);
-        setToken(mockToken);
-        setShowAuthModal(false);
-        setAuthEmail('');
-        setAuthPassword('');
-        setAuthName('');
-        
-        if (role === 'admin') {
-          setActiveTab('admin');
-        } else {
-          setActiveTab('parking');
-        }
-      } catch (err: any) {
-        setAuthError(err.message || 'Firebase Demo login failed.');
-      }
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem('parking_token', data.token);
-        setToken(data.token);
-        setUser(data.user);
-        setShowAuthModal(false);
-        if (role === 'admin') {
-          setActiveTab('admin');
-        } else {
-          setActiveTab('parking');
-        }
-        setTimeout(() => syncAllData(), 300);
-      } else {
-        setAuthError(data.error);
-      }
-    } catch (e) {
-      setAuthError('Demo gateway offline.');
-    }
-  };
-
   // --- Profile update ---
+
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileSuccess('');
@@ -1319,36 +1263,7 @@ export default function App() {
           </div>
         )}
 
-        {/* --- Quick Demo Portal Notice for Reviewers --- */}
-        {!user && (
-          <div className={`mb-6 p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-sky-50/70 border-sky-200'}`}>
-            <div className="flex items-start gap-2.5">
-              <Sparkles size={18} className="text-yellow-400 mt-0.5 animate-pulse" />
-              <div>
-                <h4 className="text-sm font-semibold">Demo Evaluation Accounts Available</h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Instant login to standard User settings or full Admin configurations using the fast credentials shortcuts. No signups required.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                id="demo-user-button"
-                onClick={() => handleQuickDemoLogin('user')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border cursor-pointer ${darkMode ? 'border-slate-700 hover:bg-slate-850' : 'border-slate-200 hover:bg-white bg-slate-100'}`}
-              >
-                Demo User Shortcut
-              </button>
-              <button
-                id="demo-admin-button"
-                onClick={() => handleQuickDemoLogin('admin')}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600/10 border border-rose-500/20 text-rose-500 hover:bg-rose-600/20 cursor-pointer"
-              >
-                Demo Admin Portal
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* --- Real-Time Analytics Dashboard Indicators (Top Widgets) --- */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1487,7 +1402,7 @@ export default function App() {
           
           <div className="pb-3 text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            Rate: <span className="font-semibold text-blue-500">${config.hourlyRate?.toFixed(2)}/hr</span>
+            Rate: <span className="font-semibold text-blue-500">₹{config.hourlyRate?.toFixed(2)}/hr</span>
             <span className="text-slate-600">|</span>
             Grace Period: <span className="font-semibold text-amber-500">{config.gracePeriodMinutes} mins</span>
           </div>
@@ -1528,9 +1443,9 @@ export default function App() {
                       onChange={(e) => setFilterFloor(e.target.value)}
                       className={`px-2 py-1 rounded text-xs focus:outline-hidden ${darkMode ? 'bg-slate-850 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-350'}`}
                     >
-                      <option value="all">All Levels</option>
-                      <option value="floor1">Deck Level 1</option>
-                      <option value="floor2">Deck Level 2</option>
+                      <option value="all" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>All Levels</option>
+                      <option value="floor1" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>Deck Level 1</option>
+                      <option value="floor2" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>Deck Level 2</option>
                     </select>
                   </div>
 
@@ -1541,10 +1456,10 @@ export default function App() {
                       onChange={(e) => setFilterStatus(e.target.value)}
                       className={`px-2 py-1 rounded text-xs focus:outline-hidden ${darkMode ? 'bg-slate-850 border-slate-700 text-slate-100' : 'bg-slate-100 border-slate-350'}`}
                     >
-                      <option value="all">All Statuses</option>
-                      <option value="available">Available</option>
-                      <option value="reserved">Reserved</option>
-                      <option value="occupied">Occupied</option>
+                      <option value="all" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>All Statuses</option>
+                      <option value="available" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>Available</option>
+                      <option value="reserved" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>Reserved</option>
+                      <option value="occupied" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>Occupied</option>
                     </select>
                   </div>
                 </div>
@@ -1710,7 +1625,7 @@ export default function App() {
                         className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
                       >
                         {slots.map(s => (
-                          <option key={s.slot_id} value={s.slot_id}>
+                          <option key={s.slot_id} value={s.slot_id} style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>
                             {s.slot_id} — Current: [{s.status.toUpperCase()}]
                           </option>
                         ))}
@@ -2032,7 +1947,7 @@ export default function App() {
                   <DollarSign size={14} className="text-emerald-500" />
                   <span>Total Revenue</span>
                 </div>
-                <div className="text-2xl font-black mt-2 font-display text-emerald-500">${adminStats?.totalRevenue?.toFixed(2) || '0.00'}</div>
+                <div className="text-2xl font-black mt-2 font-display text-emerald-500">₹{adminStats?.totalRevenue?.toFixed(2) || '0.00'}</div>
                 <p className="text-[10px] text-slate-500 mt-1">Calculated from hours consumed</p>
               </div>
 
@@ -2183,9 +2098,9 @@ export default function App() {
                         onChange={(e) => setScanBookingId(e.target.value)}
                         className={`w-full px-2.5 py-1.5 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:outline-hidden ${darkMode ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`}
                       >
-                        <option value="">-- Choose Active Ticket --</option>
+                        <option value="" style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>-- Choose Active Ticket --</option>
                         {allBookings.filter((b: any) => b.status === 'active').map((b: any) => (
-                          <option key={b.booking_id} value={b.booking_id}>
+                          <option key={b.booking_id} value={b.booking_id} style={{ backgroundColor: darkMode ? '#0f172a' : '#ffffff', color: darkMode ? '#f8fafc' : '#0f172a' }}>
                             {b.booking_id} ({b.user_name} - Slot {b.slot_id})
                           </option>
                         ))}
@@ -2483,7 +2398,7 @@ export default function App() {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Hourly Rate Multiplier</p>
-                  <p className="text-sm font-bold text-emerald-500 mt-0.5">${config.hourlyRate.toFixed(2)}</p>
+                  <p className="text-sm font-bold text-emerald-500 mt-0.5">₹{config.hourlyRate.toFixed(2)}</p>
                 </div>
               </div>
 
@@ -2512,7 +2427,7 @@ export default function App() {
               <div className={`p-2.5 rounded-lg border flex justify-between items-center text-xs ${darkMode ? 'bg-slate-950/60 border-slate-805' : 'bg-slate-50 border-slate-350'}`}>
                 <span className="text-slate-500">Estimated Total Cost:</span>
                 <span className="font-bold font-mono text-sm text-emerald-500">
-                  ${((bookingMinutes / 60) * config.hourlyRate).toFixed(2)}
+                  ₹{((bookingMinutes / 60) * config.hourlyRate).toFixed(2)}
                 </span>
               </div>
 
