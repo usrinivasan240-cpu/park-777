@@ -45,7 +45,7 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { User, ParkingSlot, Booking, ParkingNotification, AdminStats } from './types';
+import { User, ParkingSlot, Booking, ParkingNotification, AdminStats, SlotStatus } from './types';
 import { isFirebaseEnabled, db, auth } from './firebase';
 import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as fbSignOut, updateProfile, updateEmail, updatePassword } from 'firebase/auth';
@@ -1066,6 +1066,54 @@ export default function App() {
       }
     } catch (e) {
       alert('Fail.');
+    }
+  };
+
+  const handleManualSlotStatusChange = async (slotId: string, newStatus: SlotStatus) => {
+    if (isFirebaseEnabled && db) {
+      try {
+        const slotRef = doc(db, 'slots', slotId);
+        await setDoc(slotRef, {
+          status: newStatus,
+          last_updated: new Date().toISOString()
+        }, { merge: true });
+
+        // Add a notification for manual status override
+        const newNotif = {
+          id: `notif_${Date.now()}`,
+          title: "[Admin] Manual State Override",
+          message: `Slot ${slotId} was manually updated to [${newStatus.toUpperCase()}] by system administrator.`,
+          timestamp: new Date().toISOString(),
+          type: newStatus === 'available' ? 'success' : newStatus === 'reserved' ? 'info' : 'warning',
+          read: false
+        };
+        await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+      } catch (err: any) {
+        alert(err.message || 'Failed to update slot status manually.');
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/esp32/update', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          slot_id: slotId,
+          status: newStatus
+        })
+      });
+      if (res.ok) {
+        syncAllData();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to update slot status manually.');
+      }
+    } catch (e) {
+      alert('Failed to connect to API server.');
     }
   };
 
@@ -2265,12 +2313,35 @@ export default function App() {
                         <tr key={s.slot_id} className="hover:bg-slate-850/10 transition-colors">
                           <td className="py-2 px-3 font-mono font-bold text-slate-300 text-sm">{s.slot_id}</td>
                           <td className="py-2 px-3 text-slate-400">{s.location}</td>
-                          <td className="py-2 px-3">
-                            <span className={`px-1.5 py-px rounded text-[9px] uppercase font-bold ${
-                              s.status === 'available' ? 'bg-emerald-500/10 text-emerald-500' : s.status === 'reserved' ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500'
-                            }`}>
-                              {s.status}
-                            </span>
+                          <td className="py-2 px-3 flex items-center gap-2 mt-1">
+                            {/* Physical ESP32 LED Indicator representation */}
+                            <span className={`w-3 h-3 rounded-full border border-slate-700/20 flex-shrink-0 animate-pulse ${
+                              s.status === 'available' 
+                                ? 'bg-emerald-500 shadow-[0_0_8px_#10b981,inset_0_1px_1px_rgba(255,255,255,0.4)]' 
+                                : s.status === 'reserved' 
+                                ? 'bg-amber-500 shadow-[0_0_8px_#f59e0b,inset_0_1px_1px_rgba(255,255,255,0.4)]' 
+                                : 'bg-red-500 shadow-[0_0_8px_#ef4444,inset_0_1px_1px_rgba(255,255,255,0.4)]'
+                            }`} title={`Physical ESP32 LED Light: ${s.status.toUpperCase()}`} />
+
+                            <select
+                              value={s.status}
+                              onChange={(e) => handleManualSlotStatusChange(s.slot_id, e.target.value as SlotStatus)}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border outline-none cursor-pointer focus:ring-1 focus:ring-blue-500 ${
+                                s.status === 'available' 
+                                  ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                                  : s.status === 'reserved' 
+                                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
+                                  : 'bg-red-500/10 text-red-500 border-red-500/20'
+                              }`}
+                              style={{
+                                backgroundColor: darkMode ? '#0f172a' : '#ffffff',
+                                color: s.status === 'available' ? '#10b981' : s.status === 'reserved' ? '#f59e0b' : '#ef4444'
+                              }}
+                            >
+                              <option value="available" style={{ color: '#10b981', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>AVAILABLE (Green LED)</option>
+                              <option value="reserved" style={{ color: '#f59e0b', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>RESERVED (Yellow LED)</option>
+                              <option value="occupied" style={{ color: '#ef4444', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>OCCUPIED (Red LED)</option>
+                            </select>
                           </td>
                           <td className="py-2 px-3 text-right">
                             <button
