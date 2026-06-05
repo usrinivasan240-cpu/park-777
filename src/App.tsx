@@ -48,7 +48,7 @@ import {
 import { User, ParkingSlot, Booking, ParkingNotification, AdminStats } from './types';
 import { isFirebaseEnabled, db, auth } from './firebase';
 import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as fbSignOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as fbSignOut, updateProfile, updateEmail, updatePassword } from 'firebase/auth';
 
 export default function App() {
   // --- States ---
@@ -540,6 +540,45 @@ export default function App() {
     e.preventDefault();
     setProfileSuccess('');
     setProfileError('');
+
+    if (isFirebaseEnabled && auth && auth.currentUser) {
+      try {
+        const currentUser = auth.currentUser;
+        
+        // 1. Update Display Name in Firebase Auth
+        await updateProfile(currentUser, { displayName: profileName });
+        
+        // 2. Update Email in Firebase Auth if it changed
+        if (profileEmail && profileEmail !== currentUser.email) {
+          await updateEmail(currentUser, profileEmail);
+        }
+        
+        // 3. Update Password in Firebase Auth if entered
+        if (profilePassword) {
+          await updatePassword(currentUser, profilePassword);
+        }
+        
+        // 4. Update Profile doc in Firestore
+        if (db) {
+          const userRole = (profileEmail === 'watson777@gmail.com' || profileEmail === 'sriadmin@gmail.com') ? 'admin' : 'user';
+          const updatedProfile = {
+            id: currentUser.uid,
+            name: profileName,
+            email: profileEmail,
+            role: userRole
+          };
+          await setDoc(doc(db, 'users', currentUser.uid), updatedProfile, { merge: true });
+          setUser(updatedProfile);
+        }
+
+        setProfilePassword('');
+        setProfileSuccess('Profile credentials updated successfully!');
+      } catch (err: any) {
+        setProfileError(err.message || 'Failed to update profile.');
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/update-profile', {
         method: 'POST',
