@@ -4,7 +4,7 @@
 #define SENSOR_PIN 18
 #define GREEN_LED 25
 #define RED_LED 26
-#define YELLOW_LED 27  // Added Yellow LED pin
+#define YELLOW_LED 27  // Yellow LED pin
 
 const char* ssid = "Watson";
 const char* password = "srini123";
@@ -14,7 +14,10 @@ String firestoreUrl = "https://firestore.googleapis.com/v1/projects/parking-proj
 
 unsigned long lastPollTime = 0;
 const unsigned long pollInterval = 2000; // Poll Firestore every 2 seconds
-String currentLocalStatus = "available"; 
+
+// Cached status from Firestore
+String remoteStatus = "available";
+bool remoteManualOverride = false;
 
 void connectWiFi() {
   WiFi.begin(ssid, password);
@@ -28,7 +31,7 @@ void connectWiFi() {
   Serial.println(WiFi.localIP());
 }
 
-// Function to update Firestore database state
+// Function to update Firestore database state (without changing override flag)
 void updateFirestore(String statusValue) {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -50,24 +53,23 @@ void updateFirestore(String statusValue) {
   Serial.println(httpCode);
   
   if (httpCode > 0) {
-    currentLocalStatus = statusValue; // Cache local state
+    remoteStatus = statusValue; // Cache local state
   }
   http.end();
 }
 
-// Function to fetch state from Firestore
-String fetchFirestoreStatus() {
-  if (WiFi.status() != WL_CONNECTED) return "";
+// Function to fetch status AND manual_override flag from Firestore
+void fetchFirestoreData() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
   http.begin(firestoreUrl);
   int httpCode = http.GET();
   
-  String dbStatus = "";
   if (httpCode == 200) {
     String response = http.getString();
     
-    // Parse the status value without requiring external JSON libraries
+    // Parse status value without requiring external JSON libraries
     int statusIndex = response.indexOf("\"status\"");
     if (statusIndex != -1) {
       int stringValueIndex = response.indexOf("\"stringValue\"", statusIndex);
@@ -76,14 +78,34 @@ String fetchFirestoreStatus() {
         if (quoteStart != -1) {
           int quoteEnd = response.indexOf("\"", quoteStart + 1);
           if (quoteEnd != -1) {
-            dbStatus = response.substring(quoteStart + 1, quoteEnd);
+            remoteStatus = response.substring(quoteStart + 1, quoteEnd);
           }
         }
       }
     }
+
+    // Parse manual_override boolean value
+    int overrideIndex = response.indexOf("\"manual_override\"");
+    if (overrideIndex != -1) {
+      int boolValueIndex = response.indexOf("\"booleanValue\"", overrideIndex);
+      if (boolValueIndex != -1) {
+        int colonIndex = response.indexOf(":", boolValueIndex);
+        if (colonIndex != -1) {
+          String valPart = response.substring(colonIndex + 1, colonIndex + 10);
+          valPart.trim();
+          if (valPart.startsWith("true")) {
+            remoteManualOverride = true;
+          } else {
+            remoteManualOverride = false;
+          }
+        }
+      }
+    } else {
+      // If manual_override is missing from database document, default to false (sensor auto mode)
+      remoteManualOverride = false;
+    }
   }
   http.end();
-  return dbStatus;
 }
 
 // Update physical LED indicators based on state
@@ -127,45 +149,54 @@ void setup() {
 }
 
 void loop() {
-  // 1. Read the physical infrared/proximity sensor state
+  // 1. Read the physical sensor state (HIGH = car present, LOW = empty)
   bool vehiclePresent = (digitalRead(SENSOR_PIN) == HIGH); 
   
-  // 2. Poll Firestore database every 'pollInterval' (2 seconds)
+  // 2. Poll Firestore database every 2 seconds
   unsigned long currentMillis = millis();
   if (currentMillis - lastPollTime >= pollInterval) {
     lastPollTime = currentMillis;
     
-    String remoteStatus = fetchFirestoreStatus();
+    fetchFirestoreData();
     Serial.print("Remote Firestore status: ");
-    Serial.println(remoteStatus.length() > 0 ? remoteStatus : "FAIL_TO_FETCH");
+    Serial.print(remoteStatus);
+    Serial.print(" | Manual Override: ");
+    Serial.println(remoteManualOverride ? "ACTIVE" : "INACTIVE");
 
-    if (vehiclePresent) {
-      // Vehicle is physical parked. Override database state to occupied if it isn't already.
-      if (remoteStatus != "occupied") {
-        Serial.println("Vehicle arrived! Updating database to occupied...");
-        updateFirestore("occupied");
-      }
-      updateLEDs("occupied");
+    if (remoteManualOverride) {
+      // Locked in Manual Override mode by website administrator.
+      // Do NOT send sensor data to Firestore; just update LEDs to match database value.
+      updateLEDs(remoteStatus);
     } 
     else {
-      // No vehicle present on the sensor
-      if (remoteStatus == "reserved") {
-        // Slot is reserved by a user from website, light yellow LED
-        updateLEDs("reserved");
-      } 
-      else if (remoteStatus == "occupied") {
-        // Database says occupied, but sensor says empty (e.g. vehicle just left)
-        Serial.println("Vehicle departed! Updating database to available...");
-        updateFirestore("available");
-        updateLEDs("available");
+      // Normal Auto / Sensor Controlled Mode
+      if (vehiclePresent) {
+        // Vehicle is physically parked. Update database to occupied if it isn't already.
+        if (remoteStatus != "occupied") {
+          Serial.println("Vehicle arrived! Updating database to occupied...");
+          updateFirestore("occupied");
+        }
+        updateLEDs("occupied");
       } 
       else {
-        // Slot is available, light green LED
-        updateLEDs("available");
+        // No vehicle present on the sensor
+        if (remoteStatus == "reserved") {
+          // Slot is reserved from website, keep LED Yellow
+          updateLEDs("reserved");
+        } 
+        else if (remoteStatus == "occupied") {
+          // Database says occupied, but sensor is vacant (vehicle left). Update state.
+          Serial.println("Vehicle departed! Updating database to available...");
+          updateFirestore("available");
+          updateLEDs("available");
+        } 
+        else {
+          // Slot is available, keep LED Green
+          updateLEDs("available");
+        }
       }
     }
   }
   
-  // Minor delay to yield and avoid watchdogs
   delay(100);
 }

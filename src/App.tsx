@@ -1069,25 +1069,44 @@ export default function App() {
     }
   };
 
-  const handleManualSlotStatusChange = async (slotId: string, newStatus: SlotStatus) => {
+  const handleManualSlotStatusChange = async (slotId: string, newStatus: SlotStatus | 'release') => {
     if (isFirebaseEnabled && db) {
       try {
         const slotRef = doc(db, 'slots', slotId);
-        await setDoc(slotRef, {
-          status: newStatus,
-          last_updated: new Date().toISOString()
-        }, { merge: true });
+        
+        if (newStatus === 'release') {
+          await setDoc(slotRef, {
+            manual_override: false,
+            last_updated: new Date().toISOString()
+          }, { merge: true });
 
-        // Add a notification for manual status override
-        const newNotif = {
-          id: `notif_${Date.now()}`,
-          title: "[Admin] Manual State Override",
-          message: `Slot ${slotId} was manually updated to [${newStatus.toUpperCase()}] by system administrator.`,
-          timestamp: new Date().toISOString(),
-          type: newStatus === 'available' ? 'success' : newStatus === 'reserved' ? 'info' : 'warning',
-          read: false
-        };
-        await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+          const newNotif = {
+            id: `notif_${Date.now()}`,
+            title: "[Admin] Sensor Control Released",
+            message: `Manual control on Slot ${slotId} released. Hardware sensor control resumed.`,
+            timestamp: new Date().toISOString(),
+            type: 'info' as const,
+            read: false
+          };
+          await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+        } else {
+          await setDoc(slotRef, {
+            status: newStatus,
+            manual_override: true,
+            last_updated: new Date().toISOString()
+          }, { merge: true });
+
+          // Add a notification for manual status override
+          const newNotif = {
+            id: `notif_${Date.now()}`,
+            title: "[Admin] Manual State Override",
+            message: `Slot ${slotId} was manually updated to [${newStatus.toUpperCase()}] and locked by administrator.`,
+            timestamp: new Date().toISOString(),
+            type: newStatus === 'available' ? 'success' : newStatus === 'reserved' ? 'info' : 'warning',
+            read: false
+          };
+          await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+        }
       } catch (err: any) {
         alert(err.message || 'Failed to update slot status manually.');
       }
@@ -1103,7 +1122,8 @@ export default function App() {
         },
         body: JSON.stringify({
           slot_id: slotId,
-          status: newStatus
+          status: newStatus === 'release' ? 'available' : newStatus,
+          manual_override: newStatus !== 'release'
         })
       });
       if (res.ok) {
@@ -2324,10 +2344,12 @@ export default function App() {
                             }`} title={`Physical ESP32 LED Light: ${s.status.toUpperCase()}`} />
 
                             <select
-                              value={s.status}
-                              onChange={(e) => handleManualSlotStatusChange(s.slot_id, e.target.value as SlotStatus)}
+                              value={s.manual_override ? s.status : 'release'}
+                              onChange={(e) => handleManualSlotStatusChange(s.slot_id, e.target.value as SlotStatus | 'release')}
                               className={`px-1.5 py-0.5 rounded text-[10px] font-bold border outline-none cursor-pointer focus:ring-1 focus:ring-blue-500 ${
-                                s.status === 'available' 
+                                !s.manual_override
+                                  ? 'bg-slate-800/20 text-slate-400 border-slate-700/30'
+                                  : s.status === 'available' 
                                   ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
                                   : s.status === 'reserved' 
                                   ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
@@ -2335,12 +2357,13 @@ export default function App() {
                               }`}
                               style={{
                                 backgroundColor: darkMode ? '#0f172a' : '#ffffff',
-                                color: s.status === 'available' ? '#10b981' : s.status === 'reserved' ? '#f59e0b' : '#ef4444'
+                                color: !s.manual_override ? '#94a3b8' : s.status === 'available' ? '#10b981' : s.status === 'reserved' ? '#f59e0b' : '#ef4444'
                               }}
                             >
-                              <option value="available" style={{ color: '#10b981', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>AVAILABLE (Green LED)</option>
-                              <option value="reserved" style={{ color: '#f59e0b', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>RESERVED (Yellow LED)</option>
-                              <option value="occupied" style={{ color: '#ef4444', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>OCCUPIED (Red LED)</option>
+                              <option value="release" style={{ color: '#94a3b8', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>AUTO (Sensor Controlled)</option>
+                              <option value="available" style={{ color: '#10b981', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>FORCE AVAILABLE (Green LED)</option>
+                              <option value="reserved" style={{ color: '#f59e0b', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>FORCE RESERVED (Yellow LED)</option>
+                              <option value="occupied" style={{ color: '#ef4444', backgroundColor: darkMode ? '#0f172a' : '#ffffff' }}>FORCE OCCUPIED (Red LED)</option>
                             </select>
                           </td>
                           <td className="py-2 px-3 text-right">

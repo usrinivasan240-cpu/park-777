@@ -528,7 +528,7 @@ app.post("/api/notifications/read-all", (req, res) => {
 // 3. PHYSICAL ESP32 DEVICE INTEGRATION (REST API FOR ESP32 DEVICES)
 // Receives updates from IR sensors e.g. POST /api/esp32/update
 app.post("/api/esp32/update", (req, res) => {
-  const { slot_id, status } = req.body;
+  const { slot_id, status, manual_override } = req.body;
   if (!slot_id || !status) {
     return res.status(400).json({ error: "Missing required parameters: slot_id and status" });
   }
@@ -549,6 +549,24 @@ app.post("/api/esp32/update", (req, res) => {
   const slot = dbState.slots[sIdx];
   const oldStatus = slot.status;
   const nowStr = new Date().toISOString();
+
+  // If slot is under manual override, and this request isn't an admin manual override, skip updating
+  if (slot.manual_override && manual_override === undefined) {
+    console.log(`[ESP32 TRIGGER IGNORED] Slot ${slot_id} is locked in manual override mode. Sensor update skipped.`);
+    return res.json({
+      success: true,
+      slot_id: slot.slot_id,
+      previous_status: oldStatus,
+      new_status: slot.status,
+      timestamp: nowStr,
+      msg: "Skipped: manual override active"
+    });
+  }
+
+  // Set the override flag if specified in the request
+  if (manual_override !== undefined) {
+    slot.manual_override = !!manual_override;
+  }
 
   console.log(`[ESP32 TRIGGER] Hardware reporting Slot ${slot_id} transitioned from ${oldStatus} -> ${status}`);
 

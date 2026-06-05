@@ -14,6 +14,7 @@ export interface ParkingSlot {
   current_booking_id?: string;
   assigned_user_id?: string;
   last_updated?: string;
+  manual_override?: boolean;
 }
 
 export type BookingStatus = 'active' | 'completed' | 'cancelled';
