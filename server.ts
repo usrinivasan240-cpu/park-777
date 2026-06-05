@@ -13,10 +13,19 @@ let dbFirestore: any = null;
 let firebaseAdminEnabled = false;
 
 try {
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || path.join(process.cwd(), "service-account.json");
+  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const serviceAccountPath = path.join(process.cwd(), "service-account.json");
   const projectId = process.env.FIREBASE_PROJECT_ID;
 
-  if (fs.existsSync(serviceAccountPath)) {
+  if (serviceAccountEnv && serviceAccountEnv.trim().startsWith("{")) {
+    admin.initializeApp({
+      credential: admin.credential.cert(JSON.parse(serviceAccountEnv))
+    });
+    dbFirestore = admin.firestore();
+    dbFirestore.settings({ ignoreUndefinedProperties: true });
+    firebaseAdminEnabled = true;
+    console.log("[FIREBASE] Admin SDK initialized via FIREBASE_SERVICE_ACCOUNT_JSON environment variable.");
+  } else if (fs.existsSync(serviceAccountPath)) {
     admin.initializeApp({
       credential: admin.credential.cert(JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8")))
     });

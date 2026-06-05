@@ -2079,32 +2079,59 @@ export default function App() {
                     <div>
                       <div className="flex justify-between items-center text-xs mb-1">
                         <span className="text-slate-500">Hourly Multiplier (Price calculated)</span>
-                        <span className="font-bold text-blue-500">${editRate}/hr</span>
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-blue-500">₹</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={0.5}
+                            value={editRate}
+                            onChange={(e) => setEditRate(Math.max(1, Number(e.target.value)))}
+                            className={`w-16 px-1.5 py-0.5 rounded text-xs font-bold border text-right focus:outline-none ${
+                              darkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-slate-50 border-slate-200 text-blue-600'
+                            }`}
+                          />
+                          <span className="font-bold text-blue-500">/hr</span>
+                        </div>
                       </div>
                       <input
                         type="range"
                         min={1}
-                        max={20}
+                        max={100}
                         step={0.5}
                         value={editRate}
                         onChange={(e) => setEditRate(Number(e.target.value))}
-                        className="w-full"
+                        className="w-full cursor-pointer accent-blue-600"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center text-xs mb-1">
                         <span className="text-slate-500">IoT Auto Grace Expiry Period</span>
-                        <span className="font-bold text-amber-500">{editGrace} minutes</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={1}
+                            max={60}
+                            step={1}
+                            value={editGrace}
+                            onChange={(e) => setEditGrace(Math.max(1, Number(e.target.value)))}
+                            className={`w-14 px-1.5 py-0.5 rounded text-xs font-bold border text-right focus:outline-none ${
+                              darkMode ? 'bg-slate-800 border-slate-700 text-amber-400' : 'bg-slate-50 border-slate-200 text-amber-600'
+                            }`}
+                          />
+                          <span className="font-bold text-amber-500"> mins</span>
+                        </div>
                       </div>
                       <input
                         type="range"
                         min={1}
-                        max={15}
+                        max={60}
                         step={1}
                         value={editGrace}
                         onChange={(e) => setEditGrace(Number(e.target.value))}
-                        className="w-full"
+                        className="w-full cursor-pointer accent-amber-500"
                       />
                       <p className="text-[10px] text-slate-500 mt-0.5">Time allotted for ESP32 sensors to record check-in arrival before auto-vandalizing bookings.</p>
                     </div>
@@ -2444,21 +2471,35 @@ export default function App() {
               <div>
                 <div className="flex justify-between items-center text-xs mb-1">
                   <span className="text-slate-500 font-medium">Reservation Duration Time</span>
-                  <span className="font-bold text-blue-500">{bookingMinutes} minutes</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={10}
+                      max={240}
+                      step={5}
+                      value={bookingMinutes}
+                      onChange={(e) => setBookingMinutes(Math.max(1, Number(e.target.value)))}
+                      className={`w-14 px-1.5 py-0.5 rounded text-xs font-bold border text-right focus:outline-none ${
+                        darkMode ? 'bg-slate-800 border-slate-700 text-blue-400' : 'bg-slate-50 border-slate-200 text-blue-600'
+                      }`}
+                    />
+                    <span className="font-bold text-blue-500"> mins</span>
+                  </div>
                 </div>
                 <input
                   type="range"
                   min={10}
-                  max={120}
-                  step={10}
+                  max={240}
+                  step={5}
                   value={bookingMinutes}
                   onChange={(e) => setBookingMinutes(Number(e.target.value))}
-                  className="w-full"
+                  className="w-full cursor-pointer accent-blue-600"
                 />
                 <div className="flex justify-between text-[10px] text-slate-500 font-mono font-semibold mt-1">
                   <span>10 mins</span>
                   <span>1 hour</span>
                   <span>2 hours</span>
+                  <span>4 hours</span>
                 </div>
               </div>
 
