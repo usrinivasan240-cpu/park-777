@@ -724,8 +724,8 @@ export default function App() {
             const updatedSlot = {
               ...slot,
               status: 'available' as const,
-              current_booking_id: undefined,
-              assigned_user_id: undefined,
+              current_booking_id: null,
+              assigned_user_id: null,
               last_updated: new Date().toISOString()
             };
             await setDoc(doc(db, 'slots', booking.slot_id), updatedSlot);
@@ -754,6 +754,60 @@ export default function App() {
       }
     } catch (e) {
       alert('Network transmission failed.');
+    }
+  };
+
+  const handleExpireBooking = async (bookingId: string) => {
+    if (isFirebaseEnabled && db) {
+      try {
+        const booking = allBookings.find(b => b.booking_id === bookingId) || history.find(b => b.booking_id === bookingId);
+        if (booking && booking.status === 'active') {
+          await setDoc(doc(db, 'bookings', bookingId), {
+            ...booking,
+            status: 'cancelled' as const
+          });
+
+          const slot = slots.find(s => s.slot_id === booking.slot_id);
+          if (slot && slot.current_booking_id === bookingId) {
+            const updatedSlot = {
+              ...slot,
+              status: 'available' as const,
+              current_booking_id: null,
+              assigned_user_id: null,
+              last_updated: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'slots', booking.slot_id), updatedSlot);
+          }
+
+          // Add a notification for grace period expiration
+          const newNotif = {
+            id: `notif_${Date.now()}`,
+            title: "Reservation Expired",
+            message: `The booking reservation ${bookingId} on Slot ${booking.slot_id} has expired and was auto-cancelled.`,
+            timestamp: new Date().toISOString(),
+            type: 'warning' as const,
+            read: false
+          };
+          await setDoc(doc(db, 'notifications', newNotif.id), newNotif);
+        }
+      } catch (err: any) {
+        console.error('Failed to auto-expire booking:', err);
+      }
+      return;
+    }
+
+    try {
+      await fetch('/api/parking/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ booking_id: bookingId })
+      });
+      syncAllData();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -1357,7 +1411,7 @@ export default function App() {
               <CountdownTimer 
                 targetTime={activeBooking.expiry_time} 
                 onExpire={() => {
-                  syncAllData();
+                  handleExpireBooking(activeBooking.booking_id);
                 }} 
               />
               <button
