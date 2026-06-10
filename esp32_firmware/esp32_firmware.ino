@@ -26,9 +26,9 @@ struct ParkingSlot {
 
 // Exact hardware wiring configuration (pins do not change):
 ParkingSlot slots[] = {
-  {"A1", 13, 27, 26, 25, "available", false, false},
-  {"A2", 14, 33, 32, 4,  "available", false, false},
-  {"A3", 12, 18, 19, 21, "available", false, false}
+  {"A1", 13, 26, 27, 25, "available", false, false},
+  {"A2", 14, 32, 33, 4,  "available", false, false},
+  {"A3", 12, 21, 19, 18, "available", false, false}
 };
 const int numSlots = sizeof(slots) / sizeof(slots[0]);
 
@@ -110,29 +110,32 @@ void parseSlotFromBulk(const String& response, ParkingSlot& slot) {
   
   String slotChunk = response.substring(startIdx, endIdx);
   
-  // Extract status
+  // Robust parsing of "status" string value
   int statusIndex = slotChunk.indexOf("\"status\"");
   if (statusIndex != -1) {
     int stringValueIndex = slotChunk.indexOf("\"stringValue\"", statusIndex);
     if (stringValueIndex != -1) {
-      int quoteStart = slotChunk.indexOf("\"", stringValueIndex + 14);
-      if (quoteStart != -1) {
-        int quoteEnd = slotChunk.indexOf("\"", quoteStart + 1);
-        if (quoteEnd != -1) {
-          slot.remoteStatus = slotChunk.substring(quoteStart + 1, quoteEnd);
+      int colonIndex = slotChunk.indexOf(":", stringValueIndex);
+      if (colonIndex != -1) {
+        int quoteStart = slotChunk.indexOf("\"", colonIndex);
+        if (quoteStart != -1) {
+          int quoteEnd = slotChunk.indexOf("\"", quoteStart + 1);
+          if (quoteEnd != -1) {
+            slot.remoteStatus = slotChunk.substring(quoteStart + 1, quoteEnd);
+          }
         }
       }
     }
   }
   
-  // Extract manual override status
+  // Robust parsing of "manual_override" boolean value
   int overrideIndex = slotChunk.indexOf("\"manual_override\"");
   if (overrideIndex != -1) {
     int boolValueIndex = slotChunk.indexOf("\"booleanValue\"", overrideIndex);
     if (boolValueIndex != -1) {
       int colonIndex = slotChunk.indexOf(":", boolValueIndex);
       if (colonIndex != -1) {
-        String valPart = slotChunk.substring(colonIndex + 1, colonIndex + 10);
+        String valPart = slotChunk.substring(colonIndex + 1);
         valPart.trim();
         if (valPart.startsWith("true")) {
           slot.manualOverride = true;
