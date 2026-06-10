@@ -763,7 +763,8 @@ app.get("/api/admin/bookings", authMiddleware, adminMiddleware, (req, res) => {
     return {
       ...booking,
       user_name: user ? user.name : "Anonymous User",
-      user_email: user ? user.email : "Undefined Email"
+      user_email: user ? user.email : "Undefined Email",
+      user_phone: user && (user as any).phone ? (user as any).phone : ""
     };
   }).sort((a, b) => new Date(b.booking_time).getTime() - new Date(a.booking_time).getTime());
 
@@ -921,7 +922,7 @@ app.get("/api/admin/stats", authMiddleware, adminMiddleware, (req, res) => {
 // ============================================
 
 // Vite middleware for development
-if (process.env.NODE_ENV !== "production") {
+if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
   createViteServer({
     server: { middlewareMode: true },
     appType: "spa"
@@ -929,11 +930,11 @@ if (process.env.NODE_ENV !== "production") {
     app.use(vite.middlewares);
     
     // Fallback error catching
-    app.listen(PORT, "localhost", () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`[DEV SERVER] Listening securely at http://localhost:${PORT}`);
     });
   });
-} else {
+} else if (!process.env.VERCEL) {
   const distPath = path.join(process.cwd(), "dist");
   app.use(express.static(distPath));
   
@@ -941,7 +942,10 @@ if (process.env.NODE_ENV !== "production") {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
-  app.listen(PORT, "localhost", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`[PROD SERVER] Listening securely at http://localhost:${PORT}`);
   });
 }
+
+export default app;
+

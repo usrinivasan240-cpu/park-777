@@ -1,202 +1,180 @@
+/**
+ * Smart Parking System - ESP32 Firmware
+ * 
+ * This sketch runs on an ESP32 microcontroller to monitor parking slots
+ * using Infrared (IR) obstacle sensors. When a vehicle is detected (or leaves),
+ * it sends an HTTP POST request to the server's update endpoint:
+ *   POST /api/esp32/update
+ *   Body: { "slot_id": "A1", "status": "occupied" | "available" }
+ * 
+ * Hardware Setup:
+ * - ESP32 Development Board
+ * - IR Obstacle Sensors (active LOW: outputs LOW/0 when vehicle is present, HIGH/1 when slot is empty)
+ * - Status LEDs (Optional): Green for available, Red for occupied.
+ */
+
 #include <WiFi.h>
 #include <HTTPClient.h>
-
-#define SENSOR_PIN 18
-#define GREEN_LED 25
-#define RED_LED 26
-#define YELLOW_LED 27  // Yellow LED pin
+#include <ArduinoJson.h> // Ensure you have the "ArduinoJson" library installed by Benoit Blanchon
 
 const char* ssid = "Watson";
 const char* password = "srini123";
+// --- API CONFIGURATION ---
+// Change to your deployed server URL or local server IP (e.g. "http://192.168.1.100:3000/api/esp32/update")
+const char* serverUrl = "https://park-777.vercel.app/api/esp32/update";
 
-// Firestore REST Endpoint for Slot A1
-String firestoreUrl = "https://firestore.googleapis.com/v1/projects/parking-project-39e77/databases/(default)/documents/slots/A1";
+// --- PARKING SLOTS CONFIGURATION ---
+struct ParkingSlot {
+  const char* slotId;
+  int sensorPin;
+  int redLedPin;   // Optional indicator LED
+  int greenLedPin; // Optional indicator LED
+  bool lastState;  // true = occupied, false = available
+  unsigned long lastDebounceTime;
+};
 
-unsigned long lastPollTime = 0;
-const unsigned long pollInterval = 2000; // Poll Firestore every 2 seconds
+ParkingSlot slots[] = {
+  { "A1", 13, 25, 27, false, 0 }, // IR=13, Red=25, Green=27
+  { "A2", 14, 4,  33, false, 0 }, // IR=14, Red=4,  Green=33
+  { "A3", 12, 21, 18, false, 0 }  // IR=12, Red=21, Green=18
+};
 
-// Cached status from Firestore
-String remoteStatus = "available";
-bool remoteManualOverride = false;
-
-void connectWiFi() {
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-  Serial.println("WiFi Connected");
-  Serial.println(WiFi.localIP());
-}
-
-// Function to update Firestore database state (without changing override flag)
-void updateFirestore(String statusValue) {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  http.begin(firestoreUrl);
-  http.addHeader("Content-Type", "application/json");
-
-  String payload =
-  "{"
-    "\"fields\":{"
-      "\"status\":{"
-        "\"stringValue\":\"" + statusValue + "\""
-      "}"
-    "}"
-  "}";
-
-  int httpCode = http.PATCH(payload);
-  Serial.print("Firestore Status Update -> HTTP PATCH Code: ");
-  Serial.println(httpCode);
-  
-  if (httpCode > 0) {
-    remoteStatus = statusValue; // Cache local state
-  }
-  http.end();
-}
-
-// Function to fetch status AND manual_override flag from Firestore
-void fetchFirestoreData() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  HTTPClient http;
-  http.begin(firestoreUrl);
-  int httpCode = http.GET();
-  
-  if (httpCode == 200) {
-    String response = http.getString();
-    
-    // Parse status value without requiring external JSON libraries
-    int statusIndex = response.indexOf("\"status\"");
-    if (statusIndex != -1) {
-      int stringValueIndex = response.indexOf("\"stringValue\"", statusIndex);
-      if (stringValueIndex != -1) {
-        int quoteStart = response.indexOf("\"", stringValueIndex + 14);
-        if (quoteStart != -1) {
-          int quoteEnd = response.indexOf("\"", quoteStart + 1);
-          if (quoteEnd != -1) {
-            remoteStatus = response.substring(quoteStart + 1, quoteEnd);
-          }
-        }
-      }
-    }
-
-    // Parse manual_override boolean value
-    int overrideIndex = response.indexOf("\"manual_override\"");
-    if (overrideIndex != -1) {
-      int boolValueIndex = response.indexOf("\"booleanValue\"", overrideIndex);
-      if (boolValueIndex != -1) {
-        int colonIndex = response.indexOf(":", boolValueIndex);
-        if (colonIndex != -1) {
-          String valPart = response.substring(colonIndex + 1, colonIndex + 10);
-          valPart.trim();
-          if (valPart.startsWith("true")) {
-            remoteManualOverride = true;
-          } else {
-            remoteManualOverride = false;
-          }
-        }
-      }
-    } else {
-      // If manual_override is missing from database document, default to false (sensor auto mode)
-      remoteManualOverride = false;
-    }
-  }
-  http.end();
-}
-
-// Update physical LED indicators based on state
-void updateLEDs(String statusValue) {
-  if (statusValue == "occupied") {
-    digitalWrite(RED_LED, HIGH);
-    digitalWrite(GREEN_LED, LOW);
-    digitalWrite(YELLOW_LED, LOW);
-    Serial.println("LED State: RED (Occupied)");
-  } 
-  else if (statusValue == "reserved") {
-    digitalWrite(RED_LED, LOW);
-    digitalWrite(GREEN_LED, LOW);
-    digitalWrite(YELLOW_LED, HIGH);
-    Serial.println("LED State: YELLOW (Reserved)");
-  } 
-  else { // available
-    digitalWrite(RED_LED, LOW);
-    digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(YELLOW_LED, LOW);
-    Serial.println("LED State: GREEN (Available)");
-  }
-}
+const int numSlots = sizeof(slots) / sizeof(slots[0]);
+const unsigned long debounceDelay = 2000; // Debounce delay in milliseconds to filter out noise / brief blocks
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n--- Smart Parking System ESP32 Booting ---");
 
-  pinMode(SENSOR_PIN, INPUT);
-  pinMode(GREEN_LED, OUTPUT);
-  pinMode(RED_LED, OUTPUT);
-  pinMode(YELLOW_LED, OUTPUT);
+  // Initialize pins
+  for (int i = 0; i < numSlots; i++) {
+    pinMode(slots[i].sensorPin, INPUT);
+    
+    if (slots[i].redLedPin >= 0) {
+      pinMode(slots[i].redLedPin, OUTPUT);
+      digitalWrite(slots[i].redLedPin, LOW);
+    }
+    if (slots[i].greenLedPin >= 0) {
+      pinMode(slots[i].greenLedPin, OUTPUT);
+      digitalWrite(slots[i].greenLedPin, HIGH); // Default to green (available)
+    }
 
-  connectWiFi();
+    // Initialize initial state (read active LOW sensor)
+    bool val = (digitalRead(slots[i].sensorPin) == LOW);
+    slots[i].lastState = val;
+    updateLedIndicator(slots[i], val);
+  }
 
-  // Initial LED State: Green
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(RED_LED, LOW);
-  digitalWrite(YELLOW_LED, LOW);
-
-  Serial.println("Smart Parking System Started");
+  // Connect to Wi-Fi
+  connectToWiFi();
 }
 
 void loop() {
-  // 1. Read the physical sensor state (HIGH = car present, LOW = empty)
-  bool vehiclePresent = (digitalRead(SENSOR_PIN) == HIGH); 
-  
-  // 2. Poll Firestore database every 2 seconds
-  unsigned long currentMillis = millis();
-  if (currentMillis - lastPollTime >= pollInterval) {
-    lastPollTime = currentMillis;
-    
-    fetchFirestoreData();
-    Serial.print("Remote Firestore status: ");
-    Serial.print(remoteStatus);
-    Serial.print(" | Manual Override: ");
-    Serial.println(remoteManualOverride ? "ACTIVE" : "INACTIVE");
+  // Verify Wi-Fi connectivity
+  if (WiFi.status() != WL_CONNECTED) {
+    connectToWiFi();
+  }
 
-    if (remoteManualOverride) {
-      // Locked in Manual Override mode by website administrator.
-      // Do NOT send sensor data to Firestore; just update LEDs to match database value.
-      updateLEDs(remoteStatus);
-    } 
-    else {
-      // Normal Auto / Sensor Controlled Mode
-      if (vehiclePresent) {
-        // Vehicle is physically parked. Update database to occupied if it isn't already.
-        if (remoteStatus != "occupied") {
-          Serial.println("Vehicle arrived! Updating database to occupied...");
-          updateFirestore("occupied");
-        }
-        updateLEDs("occupied");
-      } 
-      else {
-        // No vehicle present on the sensor
-        if (remoteStatus == "reserved") {
-          // Slot is reserved from website, keep LED Yellow
-          updateLEDs("reserved");
-        } 
-        else if (remoteStatus == "occupied") {
-          // Database says occupied, but sensor is vacant (vehicle left). Update state.
-          Serial.println("Vehicle departed! Updating database to available...");
-          updateFirestore("available");
-          updateLEDs("available");
-        } 
-        else {
-          // Slot is available, keep LED Green
-          updateLEDs("available");
-        }
+  unsigned long currentMillis = millis();
+
+  // Scan all parking slots
+  for (int i = 0; i < numSlots; i++) {
+    // Read the IR sensor (IR sensor outputs LOW/0 when obstacle/vehicle is detected)
+    bool currentState = (digitalRead(slots[i].sensorPin) == LOW);
+
+    // If the sensor state has changed, update the debounce timer
+    if (currentState != slots[i].lastState) {
+      if (slots[i].lastDebounceTime == 0) {
+        slots[i].lastDebounceTime = currentMillis;
       }
+
+      // Check if state change has persisted for the debounce duration
+      if ((currentMillis - slots[i].lastDebounceTime) > debounceDelay) {
+        slots[i].lastState = currentState;
+        slots[i].lastDebounceTime = 0; // Reset debounce timer
+
+        // Update local LEDs
+        updateLedIndicator(slots[i], currentState);
+
+        // Send update to the backend server
+        sendSlotStatusUpdate(slots[i].slotId, currentState ? "occupied" : "available");
+      }
+    } else {
+      // Reset debounce timer if state matches last registered state
+      slots[i].lastDebounceTime = 0;
     }
   }
+
+  delay(200); // Short polling interval
+}
+
+// Helper function to update the LEDs for a slot
+void updateLedIndicator(ParkingSlot &slot, bool isOccupied) {
+  if (isOccupied) {
+    if (slot.redLedPin >= 0) digitalWrite(slot.redLedPin, HIGH);
+    if (slot.greenLedPin >= 0) digitalWrite(slot.greenLedPin, LOW);
+    Serial.printf("[SLOT %s] Status updated locally: OCCUPIED\n", slot.slotId);
+  } else {
+    if (slot.redLedPin >= 0) digitalWrite(slot.redLedPin, LOW);
+    if (slot.greenLedPin >= 0) digitalWrite(slot.greenLedPin, HIGH);
+    Serial.printf("[SLOT %s] Status updated locally: AVAILABLE\n", slot.slotId);
+  }
+}
+
+// Function to establish Wi-Fi Connection
+void connectToWiFi() {
+  Serial.print("Connecting to Wi-Fi SSID: ");
+  Serial.println(ssid);
   
-  delay(100);
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected successfully!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi Connection Failed! Will retry in the next loop.");
+  }
+}
+
+// Function to send POST request to the central server
+void sendSlotStatusUpdate(const char* slotId, const char* status) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Cannot send update: No Wi-Fi Connection");
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/json");
+
+  // Create JSON document
+  StaticJsonDocument<200> doc;
+  doc["slot_id"] = slotId;
+  doc["status"] = status;
+
+  String requestBody;
+  serializeJson(doc, requestBody);
+
+  Serial.printf("[HTTP] Sending POST to %s with payload: %s\n", serverUrl, requestBody.c_str());
+
+  int httpResponseCode = http.POST(requestBody);
+
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.printf("[HTTP] Response code: %d\n", httpResponseCode);
+    Serial.printf("[HTTP] Response: %s\n\n", response.c_str());
+  } else {
+    Serial.printf("[HTTP] POST failed. Error: %s\n\n", http.errorToString(httpResponseCode).c_str());
+  }
+
+  http.end();
 }
